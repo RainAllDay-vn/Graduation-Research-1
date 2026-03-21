@@ -15,15 +15,22 @@
 # ---
 
 # %%
+import os
 from neo4j import GraphDatabase, Result, Record
 import matplotlib.pyplot as plt
 import networkx as nx
 import json
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("python-dotenv is not installed. Loading from environment directly where possible.")
+
 # %%
-NEO4J_URI = "bolt://localhost:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "password-to-kg"
+NEO4J_URI = os.environ.get("NEO4J_URI", "bolt://localhost:7687")
+NEO4J_USER = os.environ.get("NEO4J_USER", "neo4j")
+NEO4J_PASSWORD = os.environ.get("NEO4J_PASSWORD", "password-to-kg")
 
 driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
@@ -251,6 +258,28 @@ with driver.session() as session:
         print(f"Total IS_A relationships in database: {count}")
     else:
         print("No IS_A relationships found in database.")
+
+# %%
+analysis_query = """
+    MATCH (e:Entity)
+    OPTIONAL MATCH (e)-[:IS_A]->(c:Concept)
+    WITH e, count(c) as rel_count
+    RETURN min(rel_count) as min_rels, max(rel_count) as max_rels, avg(rel_count) as avg_rels
+"""
+with driver.session() as session:
+    result = session.run(analysis_query)
+    record = result.single()
+    if record:
+        print("IS_A relationships between entities and concepts:")
+        print(f"- min: {record['min_rels'] if record['min_rels'] is not None else 0}")
+        print(f"- max: {record['max_rels'] if record['max_rels'] is not None else 0}")
+        avg_v = record['avg_rels']
+        if avg_v is not None:
+            print(f"- average: {avg_v:.2f}")
+        else:
+            print("- average: N/A")
+    else:
+        print("No entities found for IS_A analysis.")
 
 # %%
 # Use a dictionary to track unique (child, parent, name) combinations
