@@ -19,22 +19,21 @@ class KnowledgeGraph:
             self.driver.close()
             raise RuntimeError(f"Neo4j connection could not be established. Error: {e}")
             
-        with open(self.dataset_path, encoding='utf-8') as f:
-            self.dataset = json.load(f)
-
     def close(self):
         """Close the Neo4j database driver connection."""
         self.driver.close()
 
     def load_data(self):
         """Loads all data sequentially into the Neo4j database."""
+        with open(self.dataset_path, encoding='utf-8') as f:
+            dataset = json.load(f)
         self._clear_database()
         self._create_constraints()
-        self._insert_concepts()
-        self._insert_concept_relations()
-        self._insert_entities()
-        self._insert_entity_concept_relations()
-        self._insert_entity_relations()
+        self._insert_concepts(dataset)
+        self._insert_concept_relations(dataset)
+        self._insert_entities(dataset)
+        self._insert_entity_concept_relations(dataset)
+        self._insert_entity_relations(dataset)
         print("Knowledge graph loading complete.")
 
     def get_statistic(self):
@@ -102,9 +101,9 @@ class KnowledgeGraph:
         with self.driver.session() as session:
             session.run(query)
 
-    def _insert_concepts(self):
+    def _insert_concepts(self, dataset):
         print("Inserting concepts...")
-        concepts = self.dataset.get('concepts', {})
+        concepts = dataset.get('concepts', {})
         data = [{'id': k, 'name': v['name']} for k, v in concepts.items()]
         query = """
         UNWIND $batch as item
@@ -114,9 +113,9 @@ class KnowledgeGraph:
         with self.driver.session() as session:
             session.run(query, batch=data)
 
-    def _insert_concept_relations(self):
+    def _insert_concept_relations(self, dataset):
         print("Inserting concept IS_A relations...")
-        concepts = self.dataset.get('concepts', {})
+        concepts = dataset.get('concepts', {})
         data = []
         for k, v in concepts.items():
             for parent_id in v.get('instanceOf', []):
@@ -131,9 +130,9 @@ class KnowledgeGraph:
         with self.driver.session() as session:
             session.run(query, batch=data)
 
-    def _insert_entities(self):
+    def _insert_entities(self, dataset):
         print("Inserting entities...")
-        entities = self.dataset.get('entities', {})
+        entities = dataset.get('entities', {})
         data = [{'id': k, 'name': v['name'], 'attributes': str(v.get('attributes', {}))} for k, v in entities.items()]
         
         query = """
@@ -144,9 +143,9 @@ class KnowledgeGraph:
         with self.driver.session() as session:
             session.run(query, batch=data)
 
-    def _insert_entity_concept_relations(self):
+    def _insert_entity_concept_relations(self, dataset):
         print("Inserting entity IS_A relations...")
-        entities = self.dataset.get('entities', {})
+        entities = dataset.get('entities', {})
         data = []
         for k, v in entities.items():
             for parent_id in v.get('instanceOf', []):
@@ -161,9 +160,9 @@ class KnowledgeGraph:
         with self.driver.session() as session:
             session.run(query, batch=data)
 
-    def _insert_entity_relations(self):
+    def _insert_entity_relations(self, dataset):
         print("Inserting entity-to-entity relationships...")
-        entities = self.dataset.get('entities', {})
+        entities = dataset.get('entities', {})
         unique_relations = {}
 
         for k, v in entities.items():
