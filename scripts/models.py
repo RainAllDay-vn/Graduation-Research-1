@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Union, Optional, Literal
+from neo4j import Record
 
 @dataclass
 class QualifierUnit:
@@ -27,6 +28,23 @@ class Relationship:
 @dataclass
 class Node:
     id: str
+    type: Literal['Concept', 'Entity']
     name: str
     attributes: List[Attribute]
     relationships: list[Relationship]
+
+    @staticmethod
+    def from_database_node(node):
+        if 'Concept' in node['labels']:
+            type = 'Concept'
+        elif 'Entity' in node['labels']:
+            type = 'Entity'
+        else:
+            raise ValueError("The input node doesn't have a valid label")
+        return Node(
+            id=node['id'],
+            type=type,
+            name=node['name'],
+            attributes=[],
+            relationships=[]
+        )

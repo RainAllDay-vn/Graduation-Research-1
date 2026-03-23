@@ -18,20 +18,25 @@
 # # Training Data Generator
 # This notebook generates a synthetic dataset for fine-tuning text-to-Cypher models based on 
 # a specific knowledge graph schema.
-# 
+#
 # **Core Architecture**:
 # 1. **Cypher Query Generator**: Creates sample Cypher queries targeting specific patterns.
 # 2. **Natural Language Query Generator**: Uses an LLM (litellm) to generate English equivalents.
 # 3. **Dataset Merger**: Combines paired examples into a JSONL format and writes to disk.
 
+# %% [markdown]
+# # 1. Initial set up
+
 # %%
 import os
 import json
 import random
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Literal
 import litellm
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, Record
 from neo4j.exceptions import ServiceUnavailable
+
+from models import Node
 
 # %% [markdown]
 # ## Configuration & Mock Data
@@ -178,3 +183,37 @@ if results:
         print(f"  {row['ConceptName']}: {row['TotalRelationships']}")
 else:
     print("No data available for Concept incoming relationship statistics.")
+
+# %% [markdown]
+# ## 2. Creating Cypher Generator
+# The `QueryGenerator` class is responsible for programmatically generating training pairs of Cypher queries.
+# Currently, it initializes with a database connection and provides functionality to randomly select a 
+# root `Entity` node from the Neo4j knowledge graph. This root node will serve as the starting point 
+# for building complex graph traversals.
+
+# %%
+class QueryGenerator():
+    def __init__(self, neo4j_conn: Neo4jConnection):
+        self.neo4j_conn = neo4j_conn
+
+    def generate_queries(self, include_raw = False) -> dict[str, str]:
+        result = {}
+        self.add_random_root_entity()
+        if include_raw:
+            result['raw'] = str(self.root_entity)
+        result['query'] = ''
+        return result
+
+    def add_random_root_entity(self):
+        query = """
+        MATCH (e:Entity)
+        RETURN e {.*, labels: labels(e)} AS e
+        ORDER BY rand()
+        LIMIT 1
+        """
+
+        result = self.neo4j_conn.query(query)
+        if result is None:
+            raise LookupError("There isn't any entity in the knowledge graph")
+        row = result[0]["e"]
+        self.root_entity = Node.from_database_node(row)
