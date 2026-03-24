@@ -11,7 +11,7 @@ class Hint(ABC):
         if number_of_hops < 1:
             return NameHint(entity)
         else:
-            return ConceptAndRelationHint(entity, number_of_hops-1)
+            return EntityRelationHint(entity, number_of_hops-1)
         
         
     @abstractmethod
@@ -23,26 +23,25 @@ class NameHint(Hint):
         self.root_entity = entity
 
     def get_cypher_query(self, index: int):
-        return f'(e{index} {{name: "{self.root_entity.name}"}})'
+        return f'MATCH (e{index} {{name: "{self.root_entity.name}"}})\n'
     
     def __str__(self):
         return f'Name: {{name: {self.root_entity.name}}}'
 
-class ConceptAndRelationHint(Hint):
-    """the (<C>) that <P> <E> (<QK> is <QV>)"""
+class EntityRelationHint(Hint):
+    """the (<E1>) that <P> <E2> (<QK> is <QV>)"""
 
     def __init__(self, entity: Entity, number_of_hops: int):
         self.answer_entity = entity
-        self.parent_concept = database.get_random_parent_concept(entity)
         self.predicate = database.get_random_relation(entity)
-        self.entity = self.predicate.target
-        self.hint = Hint.generate_hint(self.entity, number_of_hops) # type: ignore
+        self.hint_entity = self.predicate.target
+        self.hint = Hint.generate_hint(self.hint_entity, number_of_hops) # type: ignore
 
     def get_cypher_query(self, index:int):
-        return f'(e{index})-[:{self.predicate.name}]->{self.hint.get_cypher_query(index+1)}'
+        return self.hint.get_cypher_query(index+1) + f'MATCH (e{index})-[:{self.predicate.name}]->(e{index+1})\n'
     
     def __str__(self):
-        result = f'ConceptAndRelation: {{<C>: {self.parent_concept.name}, <P>: {self.predicate.name}, <E>: {self.entity}}}\n'
+        result = f'ConceptAndRelation: {{<E1>: {self.answer_entity.name}, <P>: {self.predicate.name}, <E2>: {self.hint_entity.name}}}\n'
         result += str(self.hint)
         return result
 
@@ -56,7 +55,7 @@ class Query(ABC):
         self.hint = Hint.generate_hint(self.target_entity, self.number_of_hops)
 
     def get_cypher_query(self):
-        return f'MATCH {self.hint.get_cypher_query(0)}'
+        return f'{self.hint.get_cypher_query(0)}' + 'RETURN e0.name'
     
     def __str__(self):
         result = f'target_entity: {self.target_entity}\n'
@@ -72,6 +71,6 @@ class QueryName(Query):
         self.generate_hint()        
 
 if __name__ == "__main__":
-    query = QueryName(2)
+    query = QueryName(3)
     print(query)
     print(query.get_cypher_query())
