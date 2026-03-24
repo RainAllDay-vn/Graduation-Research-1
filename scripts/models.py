@@ -20,7 +20,7 @@ class Attribute:
     qualifiers: Dict[str, List[QualifierUnit]] = field(default_factory=dict)
 
 @dataclass
-class Relationship:
+class Relation:
     name: str
     target: Concept | Entity
     qualifiers: Dict[str, List[QualifierUnit]] = field(default_factory=dict)
@@ -35,4 +35,4 @@ class Entity:
     id: str
     name: str
     attributes: List[Attribute]
-    relationships: list[Relationship]
+    relationships: list[Relation]

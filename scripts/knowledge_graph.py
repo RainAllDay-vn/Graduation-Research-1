@@ -1,5 +1,6 @@
 import os
 import json
+import utils
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 
@@ -203,32 +204,24 @@ class KnowledgeGraph:
     def _insert_entity_relations(self, dataset):
         print("Inserting entity-to-entity relationships...")
         entities = dataset.get('entities', {})
-        unique_relations = {}
+        data = []
 
         for k, v in entities.items():
             for relation in v.get('relations', []):
                 name = relation['predicate']
+                name = utils.to_screaming_snake_case(name)
                 if relation['direction'] == 'forward':
                     c_id, p_id = k, relation['object']
                 else:
                     c_id, p_id = relation['object'], k
-                
-                triple_key = (c_id, p_id, name)
-                new_qualifier = str(relation.get('qualifiers', {}))
+                qualifiers = str(relation.get('qualifiers', {}))
 
-                if triple_key in unique_relations:
-                    existing_item = unique_relations[triple_key]
-                    if new_qualifier not in existing_item['qualifiers']:
-                        existing_item['qualifiers'] += f" | {new_qualifier}"
-                else:
-                    unique_relations[triple_key] = {
-                        'name': name,
-                        'child_id': c_id,
-                        'parent_id': p_id,
-                        'qualifiers': new_qualifier
-                    }
-
-        data = list(unique_relations.values())
+                data.append({
+                    'name': name,
+                    'child_id': c_id,
+                    'parent_id': p_id,
+                    'qualifiers': qualifiers
+                })
         
         query = """
         UNWIND $batch AS item
