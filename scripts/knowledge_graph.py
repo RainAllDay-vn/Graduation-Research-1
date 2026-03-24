@@ -9,7 +9,11 @@ from models import Concept, Entity, Relation
 load_dotenv()
 
 class KnowledgeGraph:
-    def __init__(self, uri=None, user=None, password=None, dataset_path='../dataset/kb.json'):
+    def __init__(self, uri=None, user=None, password=None, dataset_path=None):
+        if dataset_path is None:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            dataset_path = os.path.abspath(os.path.join(base_dir, '..', 'dataset', 'kb.json'))
+            
         self.uri = uri or os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         self.user = user or os.environ.get("NEO4J_USER", "neo4j")
         self.password = password or os.environ.get("NEO4J_PASSWORD", "password-to-kg")
