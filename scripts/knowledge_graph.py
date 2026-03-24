@@ -3,6 +3,8 @@ import json
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 
+from models import Entity, Concept
+
 load_dotenv()
 
 class KnowledgeGraph:
@@ -79,6 +81,44 @@ class KnowledgeGraph:
                 stats['entity_concept_is_a_avg'] = 0.0
             
         return stats
+    
+    def get_random_entity(self) -> Entity:
+        query = """
+        MATCH (e:Entity)
+        RETURN e
+        ORDER BY RAND()
+        LIMIT 1
+        """
+
+        with self.driver.session() as session:
+            result = session.run(query).single()
+            if result is None:
+                raise LookupError('There isnt any Entity in the database.')
+            entity = result['e']
+
+            return Entity(
+                id=entity['id'],
+                name=entity['name'],
+                attributes=[],
+                relationships=[])
+    
+    def get_random_parent_concept(self, entity: Entity) -> Concept:
+        query = """
+        MATCH (e:Entity {id: $entity_id})-[:IS_A]->(c:Concept)
+        RETURN c
+        ORDER BY RAND()
+        LIMIT 1
+        """
+
+        with self.driver.session() as session:
+            result = session.run(query, entity_id=entity.id).single()
+            if result is None:
+                raise LookupError(f"Entity '{entity.id}' does not have any parent Concept.")
+            concept = result['c']
+
+            return Concept(
+                id=concept['id'],
+                name=concept['name'])
 
     def _clear_database(self):
         print("Clearing database...")
