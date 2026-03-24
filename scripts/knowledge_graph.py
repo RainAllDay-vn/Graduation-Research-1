@@ -274,3 +274,8 @@ class KnowledgeGraph:
             for i in range(0, len(data), BATCH_SIZE):
                 batch = data[i:i+BATCH_SIZE]
                 session.run(query, batch=batch)
+
+if __name__ == "__main__":
+    knowledge_graph = KnowledgeGraph()
+    knowledge_graph.load_data()
+    print(knowledge_graph.get_statistic())
