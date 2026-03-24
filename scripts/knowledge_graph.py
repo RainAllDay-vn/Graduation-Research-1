@@ -4,7 +4,7 @@ import utils
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 
-from models import Entity, Concept
+from models import Concept, Entity, Relation
 
 load_dotenv()
 
@@ -120,6 +120,34 @@ class KnowledgeGraph:
             return Concept(
                 id=concept['id'],
                 name=concept['name'])
+        
+    def get_random_relation(self, entity: Entity) -> Relation:
+        query = """
+        MATCH p = (e:Entity {id: $entity_id})-[]->(target:Entity)
+        RETURN p
+        ORDER BY RAND()
+        LIMIT 1
+        """
+
+        with self.driver.session() as session:
+            result = session.run(query, entity_id=entity.id).single()
+            if result is None:
+                raise LookupError(f"Entity '{entity.id}' does not have any relation with other entity.")
+            path = result['p']
+            label = path.relationships[0].type
+            end_node = path.end_node
+            target = Entity(
+                id=end_node['id'],
+                name=end_node['name'],
+                attributes=[],
+                relationships=[]
+            )
+
+            return Relation(
+                name=label,
+                target=target,
+                qualifiers={}
+            )
 
     def _clear_database(self):
         print("Clearing database...")
