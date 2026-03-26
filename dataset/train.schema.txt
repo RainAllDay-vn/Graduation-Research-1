@@ -1,0 +1,7 @@
+[
+    {
+        'uid': int, # Unique identifier for the question record
+        'question': str, # The primary natural language question
+        'cypher_query': str, # The target cypher query
+    }
+]

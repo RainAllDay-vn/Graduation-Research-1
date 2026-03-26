@@ -1,0 +1,60 @@
+{
+    'concepts':
+    {
+        '<id>':
+        {
+            'name': str,
+            'instanceOf': ['<id>', '<id>'], # ids of parent concept
+        }
+    },
+    'entities': # excluding concepts
+    {
+        '<id>': 
+        {
+            'name': str,
+            'instanceOf': ['<id>', '<id>'], # ids of parent concept
+            'attributes':
+            [
+                {
+                    'key': str, # attribute key
+                    'value':  # attribute value
+                    {
+                        'type': 'string'/'quantity'/'date'/'year',
+                        'value': float/int/str, # float or int for quantity, int for year, 'yyyy/mm/dd' for date
+                        'unit': str,  # for quantity
+                    },
+                    'qualifiers':
+                    {
+                        '<qk>':  # qualifier key, one key may have multiple corresponding qualifier values
+                        [
+                            {
+                                'type': 'string'/'quantity'/'date'/'year',
+                                'value': float/int/str,
+                                'unit': str,
+                            }, # the format of qualifier value is similar to attribute value
+                        ]
+                    }
+                },
+            ]
+            'relations':
+            [
+                {
+                    'predicate': str,
+                    'object': '<id>', # NOTE: it may be a concept id
+                    'direction': 'forward'/'backward',
+                    'qualifiers':
+                    {
+                        '<qk>':  # qualifier key, one key may have multiple corresponding qualifier values
+                        [
+                            {
+                                'type': 'string'/'quantity'/'date'/'year',
+                                'value': float/int/str,
+                                'unit': str,
+                            }, # the format of qualifier value is similar to attribute value
+                        ]
+                    }
+                },
+            ]
+        }
+    }
+}
