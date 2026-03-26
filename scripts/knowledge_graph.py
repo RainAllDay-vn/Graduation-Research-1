@@ -9,15 +9,10 @@ from models import Concept, Entity, Relation
 load_dotenv()
 
 class KnowledgeGraph:
-    def __init__(self, uri=None, user=None, password=None, dataset_path=None):
-        if dataset_path is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            dataset_path = os.path.abspath(os.path.join(base_dir, '..', 'dataset', 'kb.json'))
-            
+    def __init__(self, uri=None, user=None, password=None):
         self.uri = uri or os.environ.get("NEO4J_URI", "bolt://localhost:7687")
         self.user = user or os.environ.get("NEO4J_USER", "neo4j")
         self.password = password or os.environ.get("NEO4J_PASSWORD", "password-to-kg")
-        self.dataset_path = dataset_path
         
         self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
         try:
@@ -30,9 +25,15 @@ class KnowledgeGraph:
         """Close the Neo4j database driver connection."""
         self.driver.close()
 
-    def load_data(self):
+    def load_data(self, dataset_path):
         """Loads all data sequentially into the Neo4j database."""
-        with open(self.dataset_path, encoding='utf-8') as f:
+        if not os.path.isabs(dataset_path):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            dataset_path = os.path.abspath(os.path.join(base_dir, '..', dataset_path))
+        if os.path.isdir(dataset_path):
+            dataset_path = os.path.join(dataset_path, 'kb.json')
+
+        with open(dataset_path, encoding='utf-8') as f:
             dataset = json.load(f)
         self._clear_database()
         self._create_constraints()
@@ -277,5 +278,5 @@ class KnowledgeGraph:
 
 if __name__ == "__main__":
     knowledge_graph = KnowledgeGraph()
-    knowledge_graph.load_data()
+    knowledge_graph.load_data('dataset/kqa-pro')
     print(knowledge_graph.get_statistic())
