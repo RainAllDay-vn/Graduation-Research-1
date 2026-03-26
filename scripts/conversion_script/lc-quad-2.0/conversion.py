@@ -1,11 +1,21 @@
+import sys
+import os
 import requests
 import json
 import time
-import os
 import re
 from typing import List, Dict, Tuple, Set
 
+# Add the scripts directory to sys.path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+scripts_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
+if scripts_dir not in sys.path:
+    sys.path.append(scripts_dir)
+
+import utils
+
 # Constants
+
 # Discover project root (3 levels up from scripts/conversion_script/lc-quad-2.0/)
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
@@ -21,6 +31,7 @@ TRAIN_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'trai
 TEST_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'test_filtered.json')
 TRAIN_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'train_cypher.json')
 TEST_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'test_cypher.json')
+CONVERSION_ERRORS_LOG = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'conversion_errors.log')
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 HEADERS = {
@@ -142,107 +153,119 @@ def filter_dataset(input_path: str, output_path: str, labels: dict, missing: dic
 
 # --- PHASE 3: SPARQL to Cypher Conversion ---
 
-def convert_t1(sparql: str) -> str:
+def convert_t1(sparql: str, labels: Dict[str, str]) -> str:
     """Template 1: E REF ?F"""
+    match = re.search(r'wd:(Q\d+) wdt:(P\d+)', sparql)
+    try:
+        assert match is not None
+        entity = match.group(1)
+        entity = labels[entity]
+        relation = match.group(2)
+        relation = labels[relation]
+        relation = utils.to_screaming_snake_case(relation)
+
+        return f"MATCH (e:Entity {{name: '{entity}'}})-[:{relation}]->(f:Entity) RETURN f"
+    except Exception as e:
+        raise ValueError(f"Failed parse the query: {e}")
     return ""
 
-def convert_t2(sparql: str) -> str:
+def convert_t2(sparql: str, labels: Dict[str, str]) -> str:
     """Template 2: (E pred F) prop ?value"""
     return ""
 
-def convert_t3(sparql: str) -> str:
+def convert_t3(sparql: str, labels: Dict[str, str]) -> str:
     """Template 3: (E pred ?Obj ) prop value"""
     return ""
 
-def convert_t4(sparql: str) -> str:
+def convert_t4(sparql: str, labels: Dict[str, str]) -> str:
     """Template 4: E REF ?F . ?F RFG G"""
     return ""
 
-def convert_t5(sparql: str) -> str:
+def convert_t5(sparql: str, labels: Dict[str, str]) -> str:
     """Template 5: <?S P O ; ?S InstanceOf Type>"""
     return ""
 
-def convert_t6(sparql: str) -> str:
+def convert_t6(sparql: str, labels: Dict[str, str]) -> str:
     """Template 6: E REF xF . xF RFG ?G"""
     return ""
 
-def convert_t7(sparql: str) -> str:
+def convert_t7(sparql: str, labels: Dict[str, str]) -> str:
     """Template 7: <S P ?O ; ?O instanceOf Type>"""
     return ""
 
-def convert_t8(sparql: str) -> str:
+def convert_t8(sparql: str, labels: Dict[str, str]) -> str:
     """Template 8: C RCD xD . xD RDE ?E"""
     return ""
 
-def convert_t9(sparql: str) -> str:
+def convert_t9(sparql: str, labels: Dict[str, str]) -> str:
     """Template 9: ASK ?sbj ?pred ?obj filter ?obj = num"""
     return ""
 
-def convert_t10(sparql: str) -> str:
+def convert_t10(sparql: str, labels: Dict[str, str]) -> str:
     """Template 10: []"""
     return ""
 
-def convert_t11(sparql: str) -> str:
+def convert_t11(sparql: str, labels: Dict[str, str]) -> str:
     """Template 11: <?S P O ; ?S instanceOf Type ; starts with character >"""
     return ""
 
-def convert_t12(sparql: str) -> str:
+def convert_t12(sparql: str, labels: Dict[str, str]) -> str:
     """Template 12: <?S P O ; ?S instanceOf Type ; contains word >"""
     return ""
 
-def convert_t13(sparql: str) -> str:
+def convert_t13(sparql: str, labels: Dict[str, str]) -> str:
     """Template 13: Count ent (ent-pred-obj)"""
     return ""
 
-def convert_t14(sparql: str) -> str:
+def convert_t14(sparql: str, labels: Dict[str, str]) -> str:
     """Template 14: select where (ent-pred-obj1 . ent-pred-obj2)"""
     return ""
 
-def convert_t15(sparql: str) -> str:
+def convert_t15(sparql: str, labels: Dict[str, str]) -> str:
     """Template 15: ?D RDE E"""
     return ""
 
-def convert_t16(sparql: str) -> str:
+def convert_t16(sparql: str, labels: Dict[str, str]) -> str:
     """Template 16: Count Obj (ent-pred-obj)"""
     return ""
 
-def convert_t17(sparql: str) -> str:
+def convert_t17(sparql: str, labels: Dict[str, str]) -> str:
     """Template 17: ?E is_a Type, ?E pred Obj  value. MAX/MIN (value)"""
     return ""
 
-def convert_t18(sparql: str) -> str:
+def convert_t18(sparql: str, labels: Dict[str, str]) -> str:
     """Template 18: ?E is_a Type. ?E pred Obj. ?E-secondClause value. MIN (value)"""
     return ""
 
-def convert_t19(sparql: str) -> str:
+def convert_t19(sparql: str, labels: Dict[str, str]) -> str:
     """Template 19: ?E is_a Type. ?E pred Obj. ?E-secondClause value. MAX (value)"""
     return ""
 
-def convert_t20(sparql: str) -> str:
+def convert_t20(sparql: str, labels: Dict[str, str]) -> str:
     """Template 20: Ask (ent-pred-obj)"""
     return ""
 
-def convert_t21(sparql: str) -> str:
+def convert_t21(sparql: str, labels: Dict[str, str]) -> str:
     """Template 21: Ask (ent-pred-obj1 . ent-pred-obj2)"""
     return ""
 
-def convert_t22(sparql: str) -> str:
+def convert_t22(sparql: str, labels: Dict[str, str]) -> str:
     """Template 22: Ask (ent-pred-obj`)"""
     return ""
 
-def convert_t23(sparql: str) -> str:
+def convert_t23(sparql: str, labels: Dict[str, str]) -> str:
     """Template 23: Ask (ent-pred-obj1` . ent-pred-obj2)"""
     return ""
 
-def convert_t24(sparql: str) -> str:
+def convert_t24(sparql: str, labels: Dict[str, str]) -> str:
     """Template 24: Ask (ent-pred-obj1 . ent-pred-obj2`)"""
     return ""
 
-def convert_t25(sparql: str) -> str:
+def convert_t25(sparql: str, labels: Dict[str, str]) -> str:
     """Template 25: Ask (ent`-pred-obj1 . ent`-pred-obj2)"""
     return ""
 
-def convert_t26(sparql: str) -> str:
+def convert_t26(sparql: str, labels: Dict[str, str]) -> str:
     """Template 26: Ask (ent`-pred-obj)"""
     return ""
 
@@ -276,7 +299,7 @@ TEMPLATE_CONVERTERS = {
     "Ask (ent`-pred-obj)": convert_t26
 }
 
-def process_phase_three(input_path: str, output_path: str) -> dict:
+def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str]) -> dict:
     """Converts SPARQL to Cypher for a filtered dataset."""
     print(f"Converting {os.path.basename(input_path)} to Cypher...")
     if not os.path.exists(input_path):
@@ -287,7 +310,7 @@ def process_phase_three(input_path: str, output_path: str) -> dict:
         data = json.load(f)
 
     output_data = []
-    stats = {"total": len(data), "processed": 0, "unsupported": 0}
+    stats = {"total": len(data), "processed": 0, "unsupported": 0, "failed": 0}
 
     for entry in data:
         template = entry.get('template')
@@ -300,21 +323,30 @@ def process_phase_three(input_path: str, output_path: str) -> dict:
         converter = TEMPLATE_CONVERTERS.get(template_key)
         if converter:
             sparql = entry.get('sparql_wikidata', "")
-            cypher = converter(sparql)
-            if cypher:
-                entry['cypher_query'] = cypher
-                output_data.append(entry)
-                stats["processed"] += 1
-            else:
-                stats["unsupported"] += 1
+            try:
+                cypher = converter(sparql, labels)
+                if cypher:
+                    entry['cypher_query'] = cypher
+                    output_data.append(entry)
+                    stats["processed"] += 1
+                else:
+                    stats["unsupported"] += 1
+            except Exception as e:
+                stats["failed"] += 1
+                with open(CONVERSION_ERRORS_LOG, 'a', encoding='utf-8') as log_f:
+                    log_f.write(f"UID: {entry.get('uid')} | Template: {template_key} | Error: {str(e)}\n")
         else:
             stats["unsupported"] += 1
 
-    save_json(output_data, output_path, f"Cypher-converted {os.path.basename(input_path)}")
+    save_json(output_data, output_path, os.path.basename(output_path))
     return stats
 
 def main():
     try:
+        # Clear/Create log file
+        if os.path.exists(CONVERSION_ERRORS_LOG):
+            os.remove(CONVERSION_ERRORS_LOG)
+            
         # Phase 1
         labels, missing = process_phase_one()
 
@@ -336,8 +368,8 @@ def main():
 
         # Phase 3
         print("\n--- PHASE 3: SPARQL to Cypher Conversion ---")
-        train_cypher_stats = process_phase_three(TRAIN_FILTERED, TRAIN_CYPHER)
-        test_cypher_stats = process_phase_three(TEST_FILTERED, TEST_CYPHER)
+        train_cypher_stats = process_phase_three(TRAIN_FILTERED, TRAIN_CYPHER, labels)
+        test_cypher_stats = process_phase_three(TEST_FILTERED, TEST_CYPHER, labels)
 
         print("\n--- Conversion Summary ---")
         for name, s in [("Train", train_cypher_stats), ("Test", test_cypher_stats)]:
@@ -345,9 +377,8 @@ def main():
             print(f"  Available for conversion: {s['total']}")
             print(f"  Successfully processed:   {s['processed']}")
             print(f"  Unsupported/Placeholders: {s['unsupported']}")
+            print(f"  Failed with error:        {s.get('failed', 0)}")
 
-    
-        
     except Exception as e:
         print(f"CRITICAL ERROR: {e}")
 
