@@ -88,8 +88,6 @@ def main():
         }
     }
     
-    save_report(summary, "templates_summary.json")
-
     print("\n--- Summary ---")
     print(f"Unique Templates (Train): {summary['summary']['train_unique_templates']}")
     print(f"Unique Templates (Test):  {summary['summary']['test_unique_templates']}")
