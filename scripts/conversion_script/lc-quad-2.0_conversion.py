@@ -2,14 +2,20 @@ import requests
 import json
 import time
 import os
+import re
 from typing import List, Dict, Tuple, Set
 
-# Constants - Using raw strings for Windows paths
+# Constants
 BASE_PATH = r'd:\Graduation-Research-1'
 INPUT_FILE = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'entities_covered.txt')
-ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'entities_covered.json')
-ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'entity_labels.json')
-MISSING_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'missing_labels.json')
+ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entities_covered.json')
+ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entity_labels.json')
+MISSING_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'missing_labels.json')
+
+TRAIN_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'train.json')
+TEST_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'test.json')
+TRAIN_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'train.json')
+TEST_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'test.json')
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 HEADERS = {
@@ -18,140 +24,138 @@ HEADERS = {
 }
 
 def load_unique_ids(file_path: str) -> List[str]:
-    """Reads IDs from a text file, handles BOM, and returns a sorted list of unique non-empty IDs."""
+    print(f"Loading unique IDs from {file_path}...")
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Input file not found: {file_path}")
-        
     with open(file_path, 'r', encoding='utf-8-sig') as f:
-        # Filter out empty strings and whitespace
         ids = [line.strip() for line in f if line.strip()]
-    
     return sorted(list(set(ids)))
 
 def fetch_labels_with_errors(qids: List[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """
-    Fetches labels for a list of QID/PID strings from Wikidata.
-    Returns (labels_dict, errors_dict)
-    """
-    if not qids:
-        return {}, {}
-    
+    if not qids: return {}, {}
     qid_set = set(qids)
     formatted_ids = " ".join([f"wd:{q}" if not q.startswith('wd:') else q for q in qids])
-    
-    query = f"""
-    SELECT ?item ?itemLabel WHERE {{
-      VALUES ?item {{ {formatted_ids} }}
-      SERVICE wikibase:label {{ bd:serviceParam wikibase:language "en". }}
-    }}
-    """
-    
-    labels = {}
-    batch_errors = {}
-    
+    query = f"SELECT ?item ?itemLabel WHERE {{ VALUES ?item {{ {formatted_ids} }} SERVICE wikibase:label {{ bd:serviceParam wikibase:language 'en'. }} }}"
     try:
-        response = requests.post(
-            SPARQL_URL, 
-            data={'query': query, 'format': 'json'}, 
-            headers=HEADERS,
-            timeout=120 # Higher timeout for larger batches (2000)
-        )
+        response = requests.post(SPARQL_URL, data={'query': query, 'format': 'json'}, headers=HEADERS, timeout=120)
         response.raise_for_status()
         data = response.json()
-        
-        found_qids = set()
+        labels, batch_errors, found_qids = {}, {}, set()
         for binding in data['results']['bindings']:
-            uri = binding['item']['value']
-            qid = uri.split('/')[-1]
-            label = binding['itemLabel']['value']
-            
-            # Verify the QID belongs to this batch to avoid phantom entries
+            qid = binding['item']['value'].split('/')[-1]
             if qid in qid_set:
-                if label != qid:
-                    labels[qid] = label
-                    found_qids.add(qid)
-                else:
-                    batch_errors[qid] = "No English label found in Wikidata"
-                    found_qids.add(qid)
-
-        # Catch IDs that weren't returned by Wikidata at all
+                label = binding['itemLabel']['value']
+                if label != qid: labels[qid] = label
+                else: batch_errors[qid] = "No English label found in Wikidata"
+                found_qids.add(qid)
         for q in qids:
-            if q not in found_qids:
-                batch_errors[q] = "Entity not found/returned by Wikidata"
-                
+            if q not in found_qids: batch_errors[q] = "Entity not found/returned by Wikidata"
         return labels, batch_errors
-
     except Exception as e:
-        error_msg = f"Batch fetch error: {str(e)}"
-        print(f"  [!] {error_msg}")
-        return {}, {q: error_msg for q in qids}
+        print(f"  [!] Batch fetch error: {e}")
+        return {}, {q: f"Batch fetch error: {str(e)}" for q in qids}
 
-def save_json_file(data, file_path: str, description: str):
-    """Saves data to a JSON file and prints status."""
+def save_json(data, file_path: str, desc: str):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
-    print(f"Saved {len(data)} entries to {description} ({os.path.basename(file_path)})")
+    print(f"Saved {len(data)} entries to {desc}")
 
-def process_all_labels(all_ids: List[str], batch_size: int = 2000) -> Tuple[Dict[str, str], Dict[str, str]]:
-    """Iterates through all IDs in batches and fetches labels."""
-    entity_labels = {}
-    missing_labels = {}
-    total_count = len(all_ids)
-    num_batches = (total_count + batch_size - 1) // batch_size
+def process_phase_one():
+    """Handles fetching labels if they don't exist."""
+    print("\n--- PHASE 1: Label Fetching ---")
+    if os.path.exists(ENTITY_LABELS_JSON) and os.path.exists(MISSING_LABELS_JSON):
+        print("Skipping Phase 1: Output files already exist.")
+        with open(ENTITY_LABELS_JSON, 'r', encoding='utf-8') as f: labels = json.load(f)
+        with open(MISSING_LABELS_JSON, 'r', encoding='utf-8') as f: missing = json.load(f)
+        return labels, missing
+
+    all_ids = load_unique_ids(INPUT_FILE)
+    save_json(all_ids, ENTITIES_COVERED_JSON, "covered entities list")
     
-    print(f"Starting extraction for {total_count} unique IDs in batches of {batch_size}...")
-    
-    for i in range(0, total_count, batch_size):
+    entity_labels, missing_labels = {}, {}
+    batch_size = 2000
+    num_batches = (len(all_ids) + batch_size - 1) // batch_size
+    for i in range(0, len(all_ids), batch_size):
         batch = all_ids[i:i + batch_size]
-        batch_num = i // batch_size + 1
-        print(f"  Processing batch {batch_num}/{num_batches}...")
+        print(f"  Batch {i // batch_size + 1}/{num_batches}...")
+        l, e = fetch_labels_with_errors(batch)
+        entity_labels.update(l)
+        missing_labels.update(e)
+        time.sleep(1.2)
         
-        labels, errors = fetch_labels_with_errors(batch)
-        entity_labels.update(labels)
-        missing_labels.update(errors)
-        
-        # Rate limiting: Sleep slightly between batches
-        time.sleep(1.5)
-        
+    save_json(entity_labels, ENTITY_LABELS_JSON, "entity labels")
+    save_json(missing_labels, MISSING_LABELS_JSON, "missing labels")
     return entity_labels, missing_labels
 
-def perform_final_verification(total_unique: int, entity_labels: dict, missing_labels: dict):
-    """Checks if the sum of results matches the original ID count."""
-    total_processed = len(entity_labels) + len(missing_labels)
-    intersection = set(entity_labels.keys()) & set(missing_labels.keys())
+def extract_qids(sparql_query: str) -> Set[str]:
+    """Extracts all QIDs from a SPARQL query string."""
+    return set(re.findall(r'Q[0-9]+', sparql_query))
+
+def filter_dataset(input_path: str, output_path: str, labels: dict, missing: dict) -> dict:
+    """Filters a dataset file based on missing entity labels."""
+    print(f"Filtering {os.path.basename(input_path)}...")
+    if not os.path.exists(input_path):
+        print(f"  [!] Warning: {input_path} not found.")
+        return {"total": 0, "kept": 0, "filtered": 0}
+
+    with open(input_path, 'r', encoding='utf-8') as f:
+        data = json.load(f)
     
-    print("\n--- Final Verification Summary ---")
-    print(f"Original unique ID count: {total_unique}")
-    print(f"Labeled entities found:   {len(entity_labels)}")
-    print(f"Missing/No label count:   {len(missing_labels)}")
-    print(f"Total processed:          {total_processed}")
+    filtered_data = []
+    stats = {"total": len(data), "kept": 0, "filtered": 0, "reasons": {}}
     
-    if intersection:
-        print(f"WARNING: {len(intersection)} IDs appear in BOTH files!")
-    
-    if total_processed == total_unique:
-        print("✅ SUCCESS: All IDs accounted for!")
-    else:
-        diff = total_unique - total_processed
-        print(f"❌ DISCREPANCY: {diff} IDs are missing from the mapping files.")
+    for entry in data:
+        sparql = entry.get('sparql_wikidata', "")
+        qids = extract_qids(sparql)
+        
+        is_valid = True
+        failed_qid = None
+        reason = None
+        
+        for qid in qids:
+            if qid in missing:
+                is_valid = False
+                failed_qid = qid
+                reason = missing[qid]
+                break
+            if qid not in labels:
+                # If it's not in labels and not in missing, it was never fetched (missing from entities_covered.txt)
+                is_valid = False
+                failed_qid = qid
+                reason = "Entity not in covered list"
+                break
+        
+        if is_valid:
+            filtered_data.append(entry)
+            stats["kept"] += 1
+        else:
+            stats["filtered"] += 1
+            stats["reasons"][reason] = stats["reasons"].get(reason, 0) + 1
+
+    save_json(filtered_data, output_path, f"filtered {os.path.basename(input_path)}")
+    return stats
 
 def main():
     try:
-        # 1. Load data
-        all_ids = load_unique_ids(INPUT_FILE)
-        save_json_file(all_ids, ENTITIES_COVERED_JSON, "list of covered entities")
+        # Phase 1
+        labels, missing = process_phase_one()
 
-        # 2. Process labels
-        batch_size = 2000 # Increased as requested
-        labels, missing = process_all_labels(all_ids, batch_size)
+        # Phase 2
+        print("\n--- PHASE 2: Dataset Filtering ---")
+        train_stats = filter_dataset(TRAIN_RAW, TRAIN_FILTERED, labels, missing)
+        test_stats = filter_dataset(TEST_RAW, TEST_FILTERED, labels, missing)
 
-        # 3. Save results
-        save_json_file(labels, ENTITY_LABELS_JSON, "entity labels mapping")
-        save_json_file(missing, MISSING_LABELS_JSON, "missing labels reason mapping")
-
-        # 4. Verify
-        perform_final_verification(len(all_ids), labels, missing)
-
+        print("\n--- Filtering Summary ---")
+        for name, s in [("Train", train_stats), ("Test", test_stats)]:
+            print(f"{name} Dataset:")
+            print(f"  Original Count: {s['total']}")
+            print(f"  Kept Count:     {s['kept']}")
+            print(f"  Filtered Count: {s['filtered']}")
+            if s['filtered'] > 0:
+                print(f"  Top reasons for filtering:")
+                for r, count in sorted(s['reasons'].items(), key=lambda x: x[1], reverse=True)[:3]:
+                    print(f"    - {r}: {count}")
+        
     except Exception as e:
         print(f"CRITICAL ERROR: {e}")
 
