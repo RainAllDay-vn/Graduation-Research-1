@@ -6,8 +6,11 @@ import re
 from typing import List, Dict, Tuple, Set
 
 # Constants
-BASE_PATH = r'd:\Graduation-Research-1'
+# Discover project root (3 levels up from scripts/conversion_script/lc-quad-2.0/)
+BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+
 INPUT_FILE = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'entities_covered.txt')
+# Output labels into the dataset's main folder
 ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entities_covered.json')
 ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entity_labels.json')
 MISSING_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'missing_labels.json')
