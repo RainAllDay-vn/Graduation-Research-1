@@ -20,7 +20,7 @@ def analyze_templates(file_path: str, dataset_name: str) -> Dict[str, Any]:
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    # Mapping of template (as JSON string for hashability) to frequency
+    # Mapping of template key to a dict with frequency and examples
     distribution = {}
     total_entries = len(data)
 
@@ -29,9 +29,14 @@ def analyze_templates(file_path: str, dataset_name: str) -> Dict[str, Any]:
         if t is None:
             continue
         
-        # We use a sorted JSON string to handle both strings and lists/dicts consistently
+        # We use a sorted JSON string as the key to handle lists/dicts consistently
         key = json.dumps(t, sort_keys=True)
-        distribution[key] = distribution.get(key, 0) + 1
+        if key not in distribution:
+            distribution[key] = {"count": 0, "examples": []}
+            
+        distribution[key]["count"] += 1
+        if len(distribution[key]["examples"]) < 2:
+            distribution[key]["examples"].append(entry)
 
     unique_count = len(distribution)
     
@@ -42,8 +47,12 @@ def analyze_templates(file_path: str, dataset_name: str) -> Dict[str, Any]:
         "unique_templates_count": unique_count,
         # Convert back from JSON strings for the final JSON dump
         "templates": [
-            {"template": json.loads(k), "frequency": v} 
-            for k, v in sorted(distribution.items(), key=lambda x: x[1], reverse=True)
+            {
+                "template": json.loads(k), 
+                "frequency": v["count"],
+                "examples": v["examples"]
+            } 
+            for k, v in sorted(distribution.items(), key=lambda x: x[1]["count"], reverse=True)
         ]
     }
     
