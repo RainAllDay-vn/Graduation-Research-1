@@ -11,14 +11,14 @@ BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 
 
 INPUT_FILE = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'entities_covered.txt')
 # Output labels into the dataset's main folder
-ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entities_covered.json')
-ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'entity_labels.json')
-MISSING_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'temp', 'lc-quad-2.0', 'missing_labels.json')
+ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'entities_covered.json')
+ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'entity_labels.json')
+MISSING_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'missing_labels.json')
 
 TRAIN_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'train.json')
 TEST_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'test.json')
-TRAIN_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'train.json')
-TEST_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'test.json')
+TRAIN_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'train_filtered.json')
+TEST_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'test_filtered.json')
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
 HEADERS = {
