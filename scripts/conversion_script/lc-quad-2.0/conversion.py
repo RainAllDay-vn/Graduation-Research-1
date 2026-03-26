@@ -19,7 +19,6 @@ import utils
 # Discover project root (3 levels up from scripts/conversion_script/lc-quad-2.0/)
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 
-INPUT_FILE = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'entities_covered.txt')
 # Output labels into the dataset's main folder
 ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'entities_covered.json')
 ENTITY_LABELS_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'entity_labels.json')
@@ -29,8 +28,8 @@ TRAIN_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'train.json
 TEST_RAW = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'raw', 'test.json')
 TRAIN_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'train_filtered.json')
 TEST_FILTERED = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'test_filtered.json')
-TRAIN_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'train_cypher.json')
-TEST_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'test_cypher.json')
+TRAIN_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'train.json')
+TEST_CYPHER = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'test.json')
 CONVERSION_ERRORS_LOG = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'conversion_errors.log')
 
 SPARQL_URL = "https://query.wikidata.org/sparql"
@@ -77,16 +76,29 @@ def save_json(data, file_path: str, desc: str):
     print(f"Saved {len(data)} entries to {desc}")
 
 def process_phase_one():
-    """Handles fetching labels if they don't exist."""
-    print("\n--- PHASE 1: Label Fetching ---")
+    """Handles extracting all IDs from original queries and fetching labels."""
+    print("\n--- PHASE 1: ID Extraction & Label Fetching ---")
     if os.path.exists(ENTITY_LABELS_JSON) and os.path.exists(MISSING_LABELS_JSON):
-        print("Skipping Phase 1: Output files already exist.")
+        print("Skipping Phase 1 Calculation: Output files already exist.")
+        # Optional: Load anyway if we need them in main, but they are loaded from files if skipped
         with open(ENTITY_LABELS_JSON, 'r', encoding='utf-8') as f: labels = json.load(f)
         with open(MISSING_LABELS_JSON, 'r', encoding='utf-8') as f: missing = json.load(f)
         return labels, missing
 
-    all_ids = load_unique_ids(INPUT_FILE)
-    save_json(all_ids, ENTITIES_COVERED_JSON, "covered entities list")
+    all_ids_set = set()
+    for dataset_path in [TRAIN_RAW, TEST_RAW]:
+        if not os.path.exists(dataset_path):
+            print(f"  [!] Warning: {dataset_path} not found during extraction.")
+            continue
+        print(f"  Scanning {os.path.basename(dataset_path)}...")
+        with open(dataset_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            for entry in data:
+                sparql = entry.get('sparql_wikidata', "")
+                all_ids_set.update(extract_ids_from_sparql(sparql))
+    
+    all_ids = sorted(list(all_ids_set))
+    save_json(all_ids, ENTITIES_COVERED_JSON, "extracted unique IDs")
     
     entity_labels, missing_labels = {}, {}
     batch_size = 2000
@@ -97,15 +109,15 @@ def process_phase_one():
         l, e = fetch_labels_with_errors(batch)
         entity_labels.update(l)
         missing_labels.update(e)
-        time.sleep(1.2)
+        time.sleep(2)
         
     save_json(entity_labels, ENTITY_LABELS_JSON, "entity labels")
     save_json(missing_labels, MISSING_LABELS_JSON, "missing labels")
     return entity_labels, missing_labels
 
-def extract_qids(sparql_query: str) -> Set[str]:
-    """Extracts all QIDs from a SPARQL query string."""
-    return set(re.findall(r'Q[0-9]+', sparql_query))
+def extract_ids_from_sparql(sparql_query: str) -> Set[str]:
+    """Extracts all QIDs and PIDs from a SPARQL query string."""
+    return set(re.findall(r'[QP][0-9]+', sparql_query))
 
 def filter_dataset(input_path: str, output_path: str, labels: dict, missing: dict) -> dict:
     """Filters a dataset file based on missing entity labels."""
@@ -122,23 +134,23 @@ def filter_dataset(input_path: str, output_path: str, labels: dict, missing: dic
     
     for entry in data:
         sparql = entry.get('sparql_wikidata', "")
-        qids = extract_qids(sparql)
+        ids = extract_ids_from_sparql(sparql)
         
         is_valid = True
-        failed_qid = None
+        failed_id = None
         reason = None
         
-        for qid in qids:
-            if qid in missing:
+        for id in ids:
+            if id in missing:
                 is_valid = False
-                failed_qid = qid
-                reason = missing[qid]
+                failed_id = id
+                reason = missing[id]
                 break
-            if qid not in labels:
-                # If it's not in labels and not in missing, it was never fetched (missing from entities_covered.txt)
+            if id not in labels:
+                # If it's not in labels and not in missing, it was never fetched
                 is_valid = False
-                failed_qid = qid
-                reason = "Entity not in covered list"
+                failed_id = id
+                reason = "ID not in fetched labels"
                 break
         
         if is_valid:
@@ -322,11 +334,13 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
 
         converter = TEMPLATE_CONVERTERS.get(template_key)
         if converter:
-            sparql = entry.get('sparql_wikidata', "")
+            sparql = entry.get('sparql_wikidata')
             try:
                 cypher = converter(sparql, labels)
                 if cypher:
                     entry['cypher_query'] = cypher
+                    entry['original_question'] = entry['question']
+                    entry['question'] = entry.pop('paraphrased_question')
                     output_data.append(entry)
                     stats["processed"] += 1
                 else:
@@ -344,8 +358,9 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
 def main():
     try:
         # Clear/Create log file
-        if os.path.exists(CONVERSION_ERRORS_LOG):
-            os.remove(CONVERSION_ERRORS_LOG)
+        with open(CONVERSION_ERRORS_LOG, 'w', encoding='utf-8') as f:
+            pass
+            
             
         # Phase 1
         labels, missing = process_phase_one()
