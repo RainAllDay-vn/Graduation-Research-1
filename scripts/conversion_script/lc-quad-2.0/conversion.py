@@ -340,7 +340,7 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
                 if cypher:
                     entry['cypher_query'] = cypher
                     entry['original_question'] = entry['question']
-                    entry['question'] = entry.pop('paraphrased_question')
+                    entry['question'] = entry['paraphrased_question'] if entry['paraphrased_question'] else entry['question']
                     output_data.append(entry)
                     stats["processed"] += 1
                 else:
