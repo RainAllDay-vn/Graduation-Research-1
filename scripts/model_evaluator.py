@@ -8,6 +8,10 @@ from typing import List, Dict, Any, Optional, Union
 
 import litellm
 
+# Disable litellm verbose logging
+litellm.set_verbose = False
+logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -159,7 +163,7 @@ class ModelEvaluator:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on Cypher generation.")
-    parser.add_argument("--model", type=str, default="gemini/gemini-1.5-flash", help="Model name (litellm format)")
+    parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash", help="Model name (litellm format)")
     parser.add_argument("--api-key", type=str, help="API key for the model")
     parser.add_argument("--force", action="store_true", help="Force refresh cache and call AI")
     parser.add_argument("--db", type=str, default="cache/ai_cache.db", help="Path to sqlite cache database")
@@ -193,8 +197,11 @@ if __name__ == "__main__":
     try:
         results = evaluator.get_answers(dataset, template, force_refresh=args.force)
         
-        # Save results for inspection
-        output_file = f"results_{args.model.replace('/', '_')}_{args.split}.json"
+        # Save results to dataset folder
+        output_filename = f"results_{args.model.replace('/', '_')}_{args.split}.json"
+        dataset_dir = args.dataset if os.path.isdir(args.dataset) else "dataset"
+        output_file = os.path.join(dataset_dir, output_filename)
+        
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
         logger.info(f"Saved evaluation results to {output_file}")
