@@ -83,16 +83,25 @@ class ModelEvaluator:
         except sqlite3.Error as e:
             logger.error(f"Failed to cache response: {e}")
 
-    def call_model(self, prompt: str, system_prompt: str, force_refresh: bool = False) -> str:
+    def call_model(self, prompt: str, system_prompt: str, force_refresh: bool = False) -> Dict[str, Any]:
         """
-        Calls the model using litellm and returns the response content.
+        Calls the model using litellm and returns the response content and logprobs.
         Checks the sqlite cache first unless force_refresh is True.
         """
         if not force_refresh:
             cached = self._get_cached_response(system_prompt, prompt)
             if cached is not None:
-                logger.info("Using cached response from database.")
-                return cached
+                try:
+                    # Attempt to parse as JSON for structured logs
+                    data = json.loads(cached)
+                    if isinstance(data, dict) and "content" in data:
+                        logger.info("Using structured cached response from database.")
+                        return data
+                except json.JSONDecodeError:
+                    pass
+                
+                logger.info("Using legacy cached response from database.")
+                return {"content": cached, "logprobs": None}
 
         try:
             messages = [
@@ -100,21 +109,36 @@ class ModelEvaluator:
                 {"role": "user", "content": prompt}
             ]
             
+            # Use drop_params=True to ignore unsupported parameters (like logprobs for some Gemini versions)
             response = litellm.completion(
                 model=self.model_name,
                 messages=messages,
                 api_key=self.api_key,
-                api_base=self.api_base
+                api_base=self.api_base,
+                logprobs=True,
+                top_logprobs=5,
+                drop_params=True
             )
             
-            content = response.choices[0].message.content
-            result = content if content is not None else ""
+            content = response.choices[0].message.content or ""
             
-            # Cache the result
-            if result:
-                self._cache_response(system_prompt, prompt, result)
+            # Extract logprobs if available in the response
+            logprobs = None
+            try:
+                # LiteLLM: some providers return logprobs in choices[0].logprobs
+                # but with drop_params they might just not be present
+                choice = response.choices[0]
+                if hasattr(choice, 'logprobs') and choice.logprobs:
+                    logprobs = getattr(choice.logprobs, 'content', None)
+            except Exception as e:
+                logger.debug(f"Logprobs not available for this provider: {e}")
+
+            result_data = {"content": content, "logprobs": logprobs}
+            
+            # Cache the result as JSON string
+            self._cache_response(system_prompt, prompt, json.dumps(result_data, ensure_ascii=False))
                 
-            return result
+            return result_data
             
         except Exception as e:
             error_msg = f"Failed to call model '{self.model_name}': {str(e)}"
@@ -144,20 +168,25 @@ class ModelEvaluator:
             try:
                 logger.info(f"Processing item {i}/{total_count} (UID: {entry.get('uid')})")
                 prompt = prompt_template.format(**entry)
-                raw_response = self.call_model(prompt, system_prompt, force_refresh=force_refresh)
-                answer = raw_response.strip()
+                model_output = self.call_model(prompt, system_prompt, force_refresh=force_refresh)
+                
+                answer = model_output["content"].strip()
                 answer = re.sub(r'^```(cypher)?\n?', '', answer, flags=re.IGNORECASE | re.MULTILINE)
                 answer = re.sub(r'\n?```$', '', answer, flags=re.IGNORECASE | re.MULTILINE)
                 answer = answer.strip()
                 
-                # Add answer to the entry
-                entry_with_answer = {**entry, "answer": answer}
+                # Add answer and logprobs to the entry
+                entry_with_answer = {
+                    **entry, 
+                    "answer": answer,
+                    "logprobs": model_output.get("logprobs")
+                }
                 results.append(entry_with_answer)
                 
             except Exception as e:
                 logger.error(f"Failed to evaluate item {i}: {str(e)}")
                 # Append with empty answer in case of failure
-                results.append({**entry, "answer": ""})
+                results.append({**entry, "answer": "", "logprobs": None})
         
         return results
 
