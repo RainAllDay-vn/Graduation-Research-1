@@ -163,8 +163,24 @@ if __name__ == "__main__":
     parser.add_argument("--api-key", type=str, help="API key for the model")
     parser.add_argument("--force", action="store_true", help="Force refresh cache and call AI")
     parser.add_argument("--db", type=str, default="cache/ai_cache.db", help="Path to sqlite cache database")
+    parser.add_argument("--dataset", type=str, default="dataset/mini", help="Path to dataset directory")
+    parser.add_argument("--split", type=str, default="train", help="Dataset split to load (e.g., train, test)")
     
     args = parser.parse_args()
+
+    # Load dataset
+    dataset_path = os.path.join(args.dataset, f"{args.split}.json")
+    if not os.path.exists(dataset_path):
+        logger.error(f"Dataset file not found: {dataset_path}")
+        exit(1)
+        
+    try:
+        with open(dataset_path, 'r', encoding='utf-8') as f:
+            dataset = json.load(f)
+        logger.info(f"Loaded {len(dataset)} items from {dataset_path}")
+    except Exception as e:
+        logger.error(f"Failed to load dataset: {e}")
+        exit(1)
 
     evaluator = ModelEvaluator(
         model_name=args.model,
@@ -172,17 +188,16 @@ if __name__ == "__main__":
         db_path=args.db
     )
     
-    sample_dataset = [
-        {
-            "uid": 1, 
-            "question": "What is the capital of France?", 
-            "cypher_query": "MATCH (c:City {name: 'Paris'}) RETURN c"
-        }
-    ]
-    template = "Translate this question to Cypher: {question}"
+    template = "Translate this question into a Cypher query:\nQuestion: {question}"
     
     try:
-        results = evaluator.get_answers(sample_dataset, template, force_refresh=args.force)
-        print(f"Results: {json.dumps(results, indent=2)}")
+        results = evaluator.get_answers(dataset, template, force_refresh=args.force)
+        
+        # Save results for inspection
+        output_file = f"results_{args.model.replace('/', '_')}_{args.split}.json"
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        logger.info(f"Saved evaluation results to {output_file}")
+        
     except Exception as e:
-        print(f"Error during evaluation: {e}")
+        logger.error(f"Error during evaluation: {e}")
