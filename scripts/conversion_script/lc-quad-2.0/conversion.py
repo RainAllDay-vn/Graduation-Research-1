@@ -360,8 +360,7 @@ def main():
         # Clear/Create log file
         with open(CONVERSION_ERRORS_LOG, 'w', encoding='utf-8') as f:
             pass
-            
-            
+
         # Phase 1
         labels, missing = process_phase_one()
 
