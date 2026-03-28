@@ -335,16 +335,16 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
         converter = TEMPLATE_CONVERTERS.get(template_key)
         if converter:
             sparql = entry.get('sparql_wikidata')
+            entry['original_question'] = entry['question']
+            entry['question'] = entry['paraphrased_question'] if entry['paraphrased_question'] else entry['question']
             try:
                 cypher = converter(sparql, labels)
                 if cypher:
                     entry['cypher_query'] = cypher
-                    entry['original_question'] = entry['question']
-                    entry['question'] = entry['paraphrased_question'] if entry['paraphrased_question'] else entry['question']
-                    output_data.append(entry)
                     stats["processed"] += 1
                 else:
                     stats["unsupported"] += 1
+                output_data.append(entry)
             except Exception as e:
                 stats["failed"] += 1
                 with open(CONVERSION_ERRORS_LOG, 'a', encoding='utf-8') as log_f:

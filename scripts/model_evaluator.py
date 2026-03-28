@@ -4,6 +4,8 @@ import os
 import re
 import argparse
 import sqlite3
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, Union
 
 import litellm
@@ -29,6 +31,7 @@ class ModelEvaluator:
         self.api_key = api_key
         self.api_base = api_base
         self.db_path = db_path
+        self._lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
@@ -58,28 +61,30 @@ class ModelEvaluator:
     def _get_cached_response(self, system_prompt: str, user_prompt: str) -> Optional[str]:
         """Retrieves a cached response if available."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT response FROM ai_cache 
-                    WHERE model_name = ? AND system_prompt = ? AND user_prompt = ?
-                ''', (self.model_name, system_prompt, user_prompt))
-                result = cursor.fetchone()
-                return result[0] if result else None
+            with self._lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT response FROM ai_cache 
+                        WHERE model_name = ? AND system_prompt = ? AND user_prompt = ?
+                    ''', (self.model_name, system_prompt, user_prompt))
+                    result = cursor.fetchone()
+                    return result[0] if result else None
         except sqlite3.Error as e:
             logger.warning(f"Database query failed: {e}")
             return None
 
     def _cache_response(self, system_prompt: str, user_prompt: str, response: str):
-        """Stores a response in the cache."""
+        """Stores a response in the cache with thread locking."""
         try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT OR REPLACE INTO ai_cache (model_name, system_prompt, user_prompt, response)
-                    VALUES (?, ?, ?, ?)
-                ''', (self.model_name, system_prompt, user_prompt, response))
-                conn.commit()
+            with self._lock:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO ai_cache (model_name, system_prompt, user_prompt, response)
+                        VALUES (?, ?, ?, ?)
+                    ''', (self.model_name, system_prompt, user_prompt, response))
+                    conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Failed to cache response: {e}")
 
@@ -109,29 +114,36 @@ class ModelEvaluator:
                 {"role": "user", "content": prompt}
             ]
             
-            # Use drop_params=True to ignore unsupported parameters (like logprobs for some Gemini versions)
-            response = litellm.completion(
-                model=self.model_name,
-                messages=messages,
-                api_key=self.api_key,
-                api_base=self.api_base,
-                logprobs=True,
-                top_logprobs=5,
-                drop_params=True
-            )
+            # Check if model is Gemini (which currently rejects logprobs params)
+            is_gemini = self.model_name.lower().startswith("gemini")
+            
+            completion_kwargs = {
+                "model": self.model_name,
+                "messages": messages,
+                "api_key": self.api_key,
+                "api_base": self.api_base,
+                "drop_params": True
+            }
+            
+            # Explicitly only add logprobs if NOT a Gemini model to avoid 400 errors
+            if not is_gemini:
+                completion_kwargs.update({
+                    "logprobs": True,
+                    "top_logprobs": 5
+                })
+            
+            response = litellm.completion(**completion_kwargs)
             
             content = response.choices[0].message.content or ""
             
             # Extract logprobs if available in the response
             logprobs = None
             try:
-                # LiteLLM: some providers return logprobs in choices[0].logprobs
-                # but with drop_params they might just not be present
                 choice = response.choices[0]
                 if hasattr(choice, 'logprobs') and choice.logprobs:
                     logprobs = getattr(choice.logprobs, 'content', None)
             except Exception as e:
-                logger.debug(f"Logprobs not available for this provider: {e}")
+                logger.debug(f"Logprobs not available for this response: {e}")
 
             result_data = {"content": content, "logprobs": logprobs}
             
@@ -149,14 +161,14 @@ class ModelEvaluator:
         self, 
         dataset: List[Dict[str, Any]], 
         prompt_template: str,
+        max_workers: int = 5,
         force_refresh: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Evaluates the model's accuracy on a given dataset.
-        Each entry in the returned list will have an extra 'answer' field with the model response.
+        Evaluates the model's accuracy on a given dataset in parallel.
         """
-        results = []
         total_count = len(dataset)
+        results = [None] * total_count # Maintain order
         
         system_prompt = (
             "You are an expert in Cypher query language. "
@@ -164,9 +176,9 @@ class ModelEvaluator:
             "Return only the raw Cypher query, without markdown blocks or explanations."
         )
 
-        for i, entry in enumerate(dataset, 1):
+        def process_item(index: int, entry: Dict[str, Any]) -> Dict[str, Any]:
             try:
-                logger.info(f"Processing item {i}/{total_count} (UID: {entry.get('uid')})")
+                logger.debug(f"Handling item {index+1}/{total_count} (UID: {entry.get('uid')})")
                 prompt = prompt_template.format(**entry)
                 model_output = self.call_model(prompt, system_prompt, force_refresh=force_refresh)
                 
@@ -175,18 +187,31 @@ class ModelEvaluator:
                 answer = re.sub(r'\n?```$', '', answer, flags=re.IGNORECASE | re.MULTILINE)
                 answer = answer.strip()
                 
-                # Add answer and logprobs to the entry
-                entry_with_answer = {
+                return {
                     **entry, 
                     "answer": answer,
                     "logprobs": model_output.get("logprobs")
                 }
-                results.append(entry_with_answer)
-                
             except Exception as e:
-                logger.error(f"Failed to evaluate item {i}: {str(e)}")
-                # Append with empty answer in case of failure
-                results.append({**entry, "answer": "", "logprobs": None})
+                logger.error(f"Failed to evaluate item {index+1}: {str(e)}")
+                return {**entry, "answer": "", "logprobs": None}
+
+        logger.info(f"Starting evaluation with {max_workers} workers...")
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # Schedule all tasks
+            future_to_index = {
+                executor.submit(process_item, i, entry): i 
+                for i, entry in enumerate(dataset)
+            }
+            
+            completed = 0
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                results[index] = future.result()
+                completed += 1
+                if completed % 5 == 0 or completed == total_count:
+                    logger.info(f"Progress: {completed}/{total_count} items completed.")
         
         return results
 
@@ -198,6 +223,7 @@ if __name__ == "__main__":
     parser.add_argument("--db", type=str, default="cache/ai_cache.db", help="Path to sqlite cache database")
     parser.add_argument("--dataset", type=str, default="dataset/mini", help="Path to dataset directory")
     parser.add_argument("--split", type=str, default="train", help="Dataset split to load (e.g., train, test)")
+    parser.add_argument("--workers", type=int, default=5, help="Number of parallel workers for API calls")
     
     args = parser.parse_args()
 
@@ -224,7 +250,12 @@ if __name__ == "__main__":
     template = "Translate this question into a Cypher query:\nQuestion: {question}"
     
     try:
-        results = evaluator.get_answers(dataset, template, force_refresh=args.force)
+        results = evaluator.get_answers(
+            dataset=dataset, 
+            prompt_template=template, 
+            max_workers=args.workers, 
+            force_refresh=args.force
+        )
         
         # Save results to dataset folder
         output_filename = f"results_{args.model.replace('/', '_')}_{args.split}.json"
