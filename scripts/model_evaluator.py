@@ -361,14 +361,8 @@ if __name__ == "__main__":
             force_refresh=args.force
         )
         
-        # Save results to dataset folder
-        output_filename = f"results_{args.model.replace('/', '_')}_{args.split}.json"
-        dataset_dir = args.dataset if os.path.isdir(args.dataset) else "dataset"
-        output_file = os.path.join(dataset_dir, output_filename)
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        logger.info(f"Saved evaluation results to {output_file}")
+        # Final logging instead of saving to JSON
+        logger.info(f"Evaluation complete for {len(results)} items.")
         
     except Exception as e:
         logger.error(f"Error during evaluation: {e}")
