@@ -6,18 +6,12 @@ import time
 import re
 from typing import List, Dict, Tuple, Set
 
-# Add the scripts directory to sys.path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-scripts_dir = os.path.abspath(os.path.join(current_dir, '..', '..'))
-if scripts_dir not in sys.path:
-    sys.path.append(scripts_dir)
-
-import utils
-
-# Constants
-
 # Discover project root (3 levels up from scripts/conversion_script/lc-quad-2.0/)
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+if BASE_PATH not in sys.path:
+    sys.path.insert(0, BASE_PATH)
+
+from scripts import utils
 
 # Output labels into the dataset's main folder
 ENTITIES_COVERED_JSON = os.path.join(BASE_PATH, 'dataset', 'lc-quad-2.0', 'temp', 'entities_covered.json')
@@ -137,21 +131,18 @@ def filter_dataset(input_path: str, output_path: str, labels: dict, missing: dic
         ids = extract_ids_from_sparql(sparql)
         
         is_valid = True
-        failed_id = None
         reason = None
         
-        for id in ids:
-            if id in missing:
-                is_valid = False
-                failed_id = id
-                reason = missing[id]
-                break
-            if id not in labels:
-                # If it's not in labels and not in missing, it was never fetched
-                is_valid = False
-                failed_id = id
-                reason = "ID not in fetched labels"
-                break
+        if is_valid:
+            for id in ids:
+                if id in missing:
+                    is_valid = False
+                    reason = missing[id]
+                    break
+                if id not in labels:
+                    is_valid = False
+                    reason = "ID not in fetched labels"
+                    break
         
         if is_valid:
             filtered_data.append(entry)
@@ -316,27 +307,38 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
     print(f"Converting {os.path.basename(input_path)} to Cypher...")
     if not os.path.exists(input_path):
         print(f"  [!] Warning: {input_path} not found.")
-        return {"total": 0, "processed": 0}
+        return {"total": 0, "processed": 0, "unsupported": 0, "failed": 0, "empty_question": 0}
 
     with open(input_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     output_data = []
-    stats = {"total": len(data), "processed": 0, "unsupported": 0, "failed": 0}
+    stats = {"total": len(data), "processed": 0, "unsupported": 0, "failed": 0, "empty_question": 0, "final_count": 0}
 
     for entry in data:
+        # Question cleaning and filtering (always performed)
+        orig_q = entry.get('question', "")
+        p_question = entry.get('paraphrased_question', "")
+        current_q = p_question if (p_question and str(p_question).strip()) else orig_q
+        
+        if not current_q or str(current_q).strip() == "":
+            stats["empty_question"] += 1
+            continue
+
+        entry['original_question'] = orig_q
+        entry['question'] = current_q
+
+        # Conversion logic
         template = entry.get('template')
-        # Handle lists/dicts if template is not a string
-        if isinstance(template, list) or isinstance(template, dict):
+        if isinstance(template, (list, dict)):
             template_key = json.dumps(template, sort_keys=True)
         else:
             template_key = template
 
         converter = TEMPLATE_CONVERTERS.get(template_key)
-        if converter:
-            sparql = entry.get('sparql_wikidata')
-            entry['original_question'] = entry['question']
-            entry['question'] = entry['paraphrased_question'] if entry['paraphrased_question'] else entry['question']
+        sparql = entry.get('sparql_wikidata')
+
+        if converter and sparql:
             try:
                 cypher = converter(sparql, labels)
                 if cypher:
@@ -344,7 +346,6 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
                     stats["processed"] += 1
                 else:
                     stats["unsupported"] += 1
-                output_data.append(entry)
             except Exception as e:
                 stats["failed"] += 1
                 with open(CONVERSION_ERRORS_LOG, 'a', encoding='utf-8') as log_f:
@@ -352,6 +353,9 @@ def process_phase_three(input_path: str, output_path: str, labels: Dict[str, str
         else:
             stats["unsupported"] += 1
 
+        output_data.append(entry)
+
+    stats["final_count"] = len(output_data)
     save_json(output_data, output_path, os.path.basename(output_path))
     return stats
 
@@ -392,6 +396,9 @@ def main():
             print(f"  Successfully processed:   {s['processed']}")
             print(f"  Unsupported/Placeholders: {s['unsupported']}")
             print(f"  Failed with error:        {s.get('failed', 0)}")
+            print(f"  Empty questions:          {s.get('empty_question', 0)}")
+            print("-"*20)
+            print(f"  Final Count:              {s.get('final_count', 0)}")
 
     except Exception as e:
         print(f"CRITICAL ERROR: {e}")
