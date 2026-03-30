@@ -28,35 +28,42 @@ def get_cache():
     try:
         query = request.args.get('q', '')
         model = request.args.get('model', '')
+        dataset = request.args.get('dataset', '')
+        page = int(request.args.get('page', 1))
+        per_page = int(request.args.get('per_page', 24))
+        offset = (page - 1) * per_page
         
         with get_db_connection() as conn:
             cursor = conn.cursor()
             
-            sql = "SELECT * FROM ai_cache WHERE 1=1"
+            # Base filters
+            filter_sql = " WHERE 1=1"
             params = []
             
             if query:
-                sql += " AND (user_prompt LIKE ? OR response LIKE ?)"
+                filter_sql += " AND (user_prompt LIKE ? OR response LIKE ?)"
                 params.extend([f"%{query}%", f"%{query}%"])
             
             if model:
-                sql += " AND model_name LIKE ?"
+                filter_sql += " AND model_name LIKE ?"
                 params.append(f"%{model}%")
             
-            dataset = request.args.get('dataset', '')
             if dataset:
-                sql += " AND dataset_name LIKE ?"
+                filter_sql += " AND dataset_name LIKE ?"
                 params.append(f"%{dataset}%")
                 
-            sql += " ORDER BY model_name ASC"
+            # Get total count for pagination metadata
+            cursor.execute(f"SELECT COUNT(*) FROM ai_cache {filter_sql}", params)
+            total_count = cursor.fetchone()[0]
             
-            cursor.execute(sql, params)
+            # Get paginated data
+            sql = f"SELECT * FROM ai_cache {filter_sql} ORDER BY model_name ASC LIMIT ? OFFSET ?"
+            cursor.execute(sql, params + [per_page, offset])
             rows = cursor.fetchall()
             
             results = []
             for row in rows:
                 data = dict(row)
-                # Try to parse response as JSON if it is structured
                 try:
                     loaded_resp = json.loads(data['response'])
                     if isinstance(loaded_resp, dict):
@@ -66,7 +73,6 @@ def get_cache():
                 except (json.JSONDecodeError, TypeError):
                     data['parsed_response'] = {"content": data['response']}
                 
-                # Split thinking if present
                 content = data['parsed_response'].get('content', '')
                 if "</think>" in content:
                     parts = content.split("</think>", 1)
@@ -78,7 +84,13 @@ def get_cache():
                 
                 results.append(data)
                 
-            return jsonify(results)
+            return jsonify({
+                "items": results,
+                "total": total_count,
+                "page": page,
+                "per_page": per_page,
+                "total_pages": (total_count + per_page - 1) // per_page
+            })
     except Exception as e:
         logger.error(f"Error fetching cache: {e}")
         return jsonify({"error": str(e)}), 500
@@ -236,12 +248,12 @@ HTML_TEMPLATE = """
                         class="bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                         placeholder="Search cache...">
                 </div>
-                <select v-model="selectedModel" @change="fetchCache" 
+                <select v-model="selectedModel" @change="fetchCache(1)" 
                     class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">All Models</option>
                     <option v-for="m in models" :key="m" :value="m">{{m}}</option>
                 </select>
-                <select v-model="selectedDataset" @change="fetchCache" 
+                <select v-model="selectedDataset" @change="fetchCache(1)" 
                     class="bg-slate-800 border border-slate-700 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="">All Datasets</option>
                     <option v-for="d in datasets" :key="d" :value="d">{{d}}</option>
@@ -313,7 +325,7 @@ HTML_TEMPLATE = """
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
             <div class="glass p-4 rounded-xl flex items-center gap-4">
                 <div class="bg-blue-500/20 p-3 rounded-lg text-blue-400"><i class="fas fa-database text-xl"></i></div>
-                <div><p class="text-xs text-slate-400 uppercase">Total Entries</p><h3 class="text-2xl font-bold">{{cache.length}}</h3></div>
+                <div><p class="text-xs text-slate-400 uppercase">Total Entries</p><h3 class="text-2xl font-bold">{{totalEntries}}</h3></div>
             </div>
             <div class="glass p-4 rounded-xl flex items-center gap-4">
                 <div class="bg-purple-500/20 p-3 rounded-lg text-purple-400"><i class="fas fa-microchip text-xl"></i></div>
@@ -409,10 +421,53 @@ HTML_TEMPLATE = """
                     </tr>
                 </tbody>
             </table>
-            <!-- Empty State -->
             <div v-if="cache.length === 0 && !loading" class="py-20 text-center">
                 <i class="fas fa-ghost text-6xl text-slate-700 mb-4"></i>
                 <p class="text-slate-500">No cache entries found mapping your search.</p>
+            </div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="mt-8 flex items-center justify-between glass p-4 rounded-xl">
+            <div class="text-sm text-slate-400">
+                Showing <span class="text-white font-medium">{{ (currentPage - 1) * perPage + 1 }}</span> to 
+                <span class="text-white font-medium">{{ Math.min(currentPage * perPage, totalEntries) }}</span> 
+                of <span class="text-white font-medium">{{ totalEntries }}</span> entries
+            </div>
+            
+            <div class="flex gap-2">
+                <button @click="changePage(currentPage - 1)" 
+                    :disabled="currentPage === 1"
+                    class="bg-slate-800 hover:bg-slate-700 disabled:opacity-30 px-4 py-2 rounded-lg transition-all border border-slate-700">
+                    <i class="fas fa-chevron-left mr-2"></i> Previous
+                </button>
+                
+                <div class="flex gap-1">
+                    <template v-for="p in displayedPages" :key="p">
+                        <button v-if="p !== '...'" @click="changePage(p)"
+                            :class="currentPage === p ? 'bg-blue-600 border-blue-500' : 'bg-slate-800 hover:bg-slate-700 border-slate-700'"
+                            class="w-10 h-10 rounded-lg flex items-center justify-center border font-medium transition-all">
+                            {{p}}
+                        </button>
+                        <span v-else class="w-10 h-10 flex items-center justify-center text-slate-500">...</span>
+                    </template>
+                </div>
+
+                <button @click="changePage(currentPage + 1)" 
+                    :disabled="currentPage === totalPages"
+                    class="bg-slate-800 hover:bg-slate-700 disabled:opacity-30 px-4 py-2 rounded-lg transition-all border border-slate-700">
+                    Next <i class="fas fa-chevron-right ml-2"></i>
+                </button>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-500 uppercase">Per Page:</span>
+                <select v-model="perPage" @change="fetchCache(1)" class="bg-slate-800 border border-slate-700 rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <option :value="12">12</option>
+                    <option :value="24">24</option>
+                    <option :value="48">48</option>
+                    <option :value="96">96</option>
+                </select>
             </div>
         </div>
 
@@ -456,7 +511,7 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        const { createApp, ref, onMounted } = Vue;
+        const { createApp, ref, onMounted, computed } = Vue;
 
         createApp({
             setup() {
@@ -474,23 +529,58 @@ HTML_TEMPLATE = """
                 const sqlResult = ref(null);
                 const sqlLoading = ref(false);
                 const viewMode = ref('grid');
+                const currentPage = ref(1);
+                const perPage = ref(24);
+                const totalPages = ref(0);
+                const totalEntries = ref(0);
 
-                const fetchCache = async () => {
+                const fetchCache = async (page = null) => {
+                    if (page !== null) currentPage.value = page;
                     loading.value = true;
                     try {
                         const url = new URL('/api/cache', window.location.origin);
                         if (searchQuery.value) url.searchParams.append('q', searchQuery.value);
                         if (selectedModel.value) url.searchParams.append('model', selectedModel.value);
                         if (selectedDataset.value) url.searchParams.append('dataset', selectedDataset.value);
+                        url.searchParams.append('page', currentPage.value);
+                        url.searchParams.append('per_page', perPage.value);
                         
                         const res = await fetch(url);
-                        cache.value = await res.json();
+                        const data = await res.json();
+                        cache.value = data.items;
+                        totalEntries.value = data.total;
+                        totalPages.value = data.total_pages;
                     } catch (e) {
                         console.error(e);
                     } finally {
                         loading.value = false;
                     }
                 };
+
+                const changePage = (p) => {
+                    if (p >= 1 && p <= totalPages.value) {
+                        fetchCache(p);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                };
+
+                const displayedPages = computed(() => {
+                    const pages = [];
+                    const maxVisible = 5;
+                    
+                    if (totalPages.value <= maxVisible) {
+                        for (let i = 1; i <= totalPages.value; i++) pages.push(i);
+                    } else {
+                        if (currentPage.value <= 3) {
+                            pages.push(1, 2, 3, 4, '...', totalPages.value);
+                        } else if (currentPage.value >= totalPages.value - 2) {
+                            pages.push(1, '...', totalPages.value - 3, totalPages.value - 2, totalPages.value - 1, totalPages.value);
+                        } else {
+                            pages.push(1, '...', currentPage.value - 1, currentPage.value, currentPage.value + 1, '...', totalPages.value);
+                        }
+                    }
+                    return pages;
+                });
 
                 const fetchModels = async () => {
                     try {
@@ -506,7 +596,7 @@ HTML_TEMPLATE = """
                 let debounceTimer;
                 const debouncedFetch = () => {
                     clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(fetchCache, 300);
+                    debounceTimer = setTimeout(() => fetchCache(1), 300);
                 };
 
                 const editItem = (item) => {
@@ -573,7 +663,8 @@ HTML_TEMPLATE = """
                 return {
                     cache, models, datasets, searchQuery, selectedModel, selectedDataset, loading,
                     editingItem, editBuffer, showSql, sqlQuery, sqlResult, sqlLoading, viewMode,
-                    fetchCache, debouncedFetch, editItem, saveEdit, deleteItem, runSql
+                    currentPage, perPage, totalPages, totalEntries, displayedPages,
+                    fetchCache, debouncedFetch, editItem, saveEdit, deleteItem, runSql, changePage
                 };
             }
         }).mount('#app');
