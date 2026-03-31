@@ -3,4 +3,4 @@ __pycache__/
 cache/
 ssh_key
 ssh_key.pub
-vastai_key.txt
+agents.md
