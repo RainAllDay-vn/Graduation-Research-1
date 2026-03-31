@@ -1,8 +1,8 @@
 import os
 import json
-import utils
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
+from scripts import utils
 
 from models import Concept, Entity, Relation
 
