@@ -18,13 +18,41 @@ def _():
 
 
 @app.cell
+def _(mo):
+    mo.md("""
+    # Model Analysis: Reasoning Performance Comparison
+
+    This notebook analyzes and compares the performance of **Qwen/Qwen3.5-4B** on the **LC-QuAD 2.0** dataset, specifically focusing on the difference between responses generated with and without reasoning enabled.
+
+    ### Key Objectives:
+    - Compare Cypher query character lengths.
+    - Analyze the "thinking" process length for reasoning-enabled models.
+    - Visualize distributions and identify potential outliers or patterns.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Data Loading and Preparation
+
+    We retrieve cached model responses from a SQLite database (`ai_cache.db`).
+    - For **Reasoning OFF**, we extract the JSON content directly.
+    - For **Reasoning ON**, we parse the content to separate the `<think>` reasoning block from the final Cypher query.
+    """)
+    return
+
+
+@app.cell
 def _(os, pd, sqlite3):
     _db_path = os.path.join(os.path.dirname(__file__), '..', 'cache', 'ai_cache.db')
     _conn = sqlite3.connect(_db_path)
 
-    # Load reasoning=0 data
+    # Load reasoning=0 data with all fields
     _query_no = """
     SELECT 
+        *,
         json_extract(response, '$.content') AS content
     FROM ai_cache 
     WHERE model_name = 'Qwen/Qwen3.5-4B' 
@@ -35,9 +63,10 @@ def _(os, pd, sqlite3):
     df_no_reason = pd.read_sql_query(_query_no, _conn)
     df_no_reason['query_length'] = pd.to_numeric(df_no_reason['content'].str.len(), errors='coerce')
 
-    # Load reasoning=1 data
+    # Load reasoning=1 data with all fields
     _query_re = """
     SELECT 
+        *,
         json_extract(response, '$.content') AS full_content
     FROM ai_cache 
     WHERE model_name = 'Qwen/Qwen3.5-4B' 
@@ -59,7 +88,7 @@ def _(os, pd, sqlite3):
         return None
 
     _parts = df_reason['full_content'].apply(_extract_parts)
-    invalid_response_count = _parts.isna().sum()
+    invalid_response_count = int(_parts.isna().sum())
     _valid_parts = _parts.dropna()
 
     # Initialize columns with empty/None
@@ -79,6 +108,26 @@ def _(os, pd, sqlite3):
 
 
 @app.cell
+def _(mo):
+    mo.md("""
+    ## Data Preview
+    """)
+    return
+
+
+@app.cell
+def _(df_no_reason, df_reason, mo):
+    _preview = mo.vstack([
+        mo.md("### Preview: Reasoning OFF"),
+        mo.ui.table(df_no_reason.head()),
+        mo.md("### Preview: Reasoning ON"),
+        mo.ui.table(df_reason.head())
+    ])
+    _preview
+    return
+
+
+@app.cell
 def _(df_no_reason, df_reason, invalid_response_count, mo):
     if df_no_reason.empty or df_reason.empty:
         _stats_md = mo.md("# Missing data for comparison.")
@@ -93,7 +142,7 @@ def _(df_no_reason, df_reason, invalid_response_count, mo):
             _invalid_msg = f"**Note:** {invalid_response_count} responses were skipped because they were missing `</think>` tags."
 
         _stats_md = mo.md(f"""
-        # Summary Statistics: Reasoning OFF vs ON
+        ## Summary Statistics: Reasoning OFF vs ON
 
         This table compares the **Cypher Query** character lengths:
         - **OFF: Response**: The full response (query only) when reasoning is disabled.
@@ -113,6 +162,69 @@ def _(df_no_reason, df_reason, invalid_response_count, mo):
         """)
 
     _stats_md
+    return
+
+
+@app.cell
+def _(df_no_reason, df_reason, mo, pd):
+    def _get_samples(df, text_col, n=5):
+        if df.empty:
+            return pd.DataFrame()
+
+        # Ensure variety by dropping identical queries first
+        _unique_df = df.drop_duplicates(subset=[text_col])
+        _n = min(n, len(_unique_df))
+
+        # Random sample for a diverse view
+        return _unique_df.sample(n=_n, random_state=42)
+
+    _samples_off = _get_samples(df_no_reason, 'content')
+    _samples_on = _get_samples(df_reason, 'query_text')
+
+    def _format_list(samples, text_col):
+        if samples.empty:
+            return "_No samples available._"
+
+        items = []
+        for _, _row in samples.iterrows():
+            _question = _row['question'] if 'question' in _row else "Unknown Question"
+            _length = int(_row['query_length'])
+            _text = _row[text_col].strip() if _row[text_col] else "[Empty]"
+
+            # Format each sample with its question and the Cypher query
+            _item_md = (
+                f"**Question:** {_question}\n\n"
+                f"**Query (Length: {_length} chars):**\n"
+                f"```cypher\n{_text}\n```"
+            )
+            items.append(_item_md)
+
+        return "\n\n---\n\n".join(items)
+
+    _content = mo.md(f"""
+    ## Random Sample Queries
+
+    These samples are selected at random from the dataset to provide a diverse look at the model's output quality.
+
+    ### Reasoning OFF (Average: {df_no_reason['query_length'].mean() if not df_no_reason.empty else 0:.1f} chars)
+    {_format_list(_samples_off, 'content')}
+
+    ### Reasoning ON (Average: {df_reason['query_length'].mean() if not df_reason.empty else 0:.1f} chars)
+    {_format_list(_samples_on, 'query_text')}
+    """)
+
+    _content
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Distribution Analysis
+
+    The following visualizations compare the character length distributions of the generated Cypher queries.
+    Note that for reasoning-enabled models, we only measure the *final query* length, excluding the thinking process.
+    """)
     return
 
 
@@ -171,6 +283,17 @@ def _(df_no_reason, df_reason, plt):
 
 
 @app.cell
+def _(mo):
+    mo.md("""
+    ## Thinking Process Analysis
+
+    When reasoning is enabled, the model generates a "thinking" chain before producing the final query.
+    Below is the distribution of the length (in characters) of these reasoning paths.
+    """)
+    return
+
+
+@app.cell
 def _(df_reason, plt):
     _fig = None
     if not df_reason.empty:
@@ -195,45 +318,6 @@ def _(df_reason, plt):
         plt.tight_layout()
 
     _fig
-    return
-
-
-@app.cell
-def _(df_no_reason, df_reason, mo, pd):
-    def _get_samples(df, len_col, text_col, n=5):
-        if df.empty:
-            return pd.DataFrame()
-        avg_len = df[len_col].mean()
-    
-        samples_df = (
-            df.assign(diff=(df[len_col] - avg_len).abs())
-            .sort_values("diff")
-            .drop_duplicates(subset=[text_col])
-            .head(n)
-            .drop(columns=["diff"]) # Clean up the helper column
-        )
-    
-        return samples_df
-
-    _samples_off = _get_samples(df_no_reason, 'query_length', 'content')
-    _samples_on = _get_samples(df_reason, 'query_length', 'query_text')
-
-    def _format_list(samples):
-        pass
-
-    _content = mo.md(f"""
-    # Representative Sample Queries (Near Average Length)
-
-    These samples are selected because their character lengths are closest to the dataset mean.
-
-    ### Reasoning OFF (Average: {df_no_reason['query_length'].mean() if not df_no_reason.empty else 0:.1f} chars)
-    {_format_list(_samples_off)}
-
-    ### Reasoning ON (Average: {df_reason['query_length'].mean() if not df_reason.empty else 0:.1f} chars)
-    {_format_list(_samples_on)}
-    """)
-
-    _content
     return
 
 
