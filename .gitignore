@@ -1,5 +1,6 @@
 .env
 __pycache__/
+__marimo__/
 cache/
 ssh_key
 ssh_key.pub
