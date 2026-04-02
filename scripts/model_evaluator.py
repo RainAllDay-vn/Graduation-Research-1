@@ -4,7 +4,6 @@ import os
 import re
 import argparse
 import sqlite3
-import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, cast
 
@@ -35,9 +34,7 @@ class ModelEvaluator:
         self.logprobs = logprobs
         self.top_logprobs = top_logprobs
         self.include_reasoning = include_reasoning
-        self._lock = threading.Lock()
         self._init_db()
-
 
     def _init_db(self):
         """Initializes the SQLite database and ensures it's ready for use with the expected normalized schema."""
@@ -73,45 +70,6 @@ class ModelEvaluator:
         cursor.execute(f"INSERT INTO {table} (content) VALUES (?)", (content,))
         return cursor.lastrowid
 
-    def _get_cached_response(self, dataset_name: str, system_prompt: str, template: str, question: str) -> Optional[str]:
-        """Retrieves a cached response if available using normalized lookups."""
-        try:
-            with self._lock:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    
-                    # Get IDs
-                    cursor.execute("SELECT id FROM system_prompts WHERE content = ?", (system_prompt,))
-                    sys_res = cursor.fetchone()
-                    if not sys_res: return None
-                    
-                    cursor.execute("SELECT id FROM user_prompt_templates WHERE content = ?", (template,))
-                    tmpl_res = cursor.fetchone()
-                    if not tmpl_res: return None
-                    
-                    cursor.execute('''
-                        SELECT response, logprobs FROM ai_cache 
-                        WHERE model_name = ? AND dataset_name = ? AND system_prompt_id = ? AND template_id = ? AND question = ? AND include_reasoning = ?
-                    ''', (self.model_name, dataset_name, sys_res[0], tmpl_res[0], question, int(self.include_reasoning)))
-                    
-                    result = cursor.fetchone()
-                    if result:
-                        response_text, logprobs_text = result
-                        try:
-                            # If logprobs_text exists, it might be more up-to-date than what's inside response_text
-                            data = json.loads(response_text)
-                            if isinstance(data, dict):
-                                if logprobs_text and ("logprobs" not in data or data["logprobs"] is None):
-                                    data["logprobs"] = json.loads(logprobs_text)
-                                return json.dumps(data)
-                            return response_text
-                        except:
-                            return response_text
-                    return None
-        except sqlite3.Error as e:
-            logger.warning(f"Database query failed: {e}")
-            return None
-
     def _cache_response(self, dataset_name: str, system_prompt: str, template: str, question: str, response: str, logprobs: Optional[List[Any]] = None):
         """Stores a response in the cache with thread locking and normalization."""
         try:
@@ -126,19 +84,18 @@ class ModelEvaluator:
             except:
                 pass
 
-            with self._lock:
-                with sqlite3.connect(self.db_path) as conn:
-                    cursor = conn.cursor()
-                    
-                    sys_id = self._get_or_create_id(cursor, "system_prompts", system_prompt)
-                    tmpl_id = self._get_or_create_id(cursor, "user_prompt_templates", template)
-                    
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO ai_cache 
-                        (model_name, dataset_name, system_prompt_id, template_id, question, include_reasoning, response, logprobs)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (self.model_name, dataset_name, sys_id, tmpl_id, question, int(self.include_reasoning), response, logprobs_json))
-                    conn.commit()
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                sys_id = self._get_or_create_id(cursor, "system_prompts", system_prompt)
+                tmpl_id = self._get_or_create_id(cursor, "user_prompt_templates", template)
+                
+                cursor.execute('''
+                    INSERT OR REPLACE INTO ai_cache 
+                    (model_name, dataset_name, system_prompt_id, template_id, question, include_reasoning, response, logprobs)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (self.model_name, dataset_name, sys_id, tmpl_id, question, int(self.include_reasoning), response, logprobs_json))
+                conn.commit()
         except sqlite3.Error as e:
             logger.error(f"Failed to cache response: {e}")
 
@@ -151,20 +108,6 @@ class ModelEvaluator:
         db_template = prompt_template.replace("{question}", "{{question}}")
         prompt = prompt_template.format(question=question)
 
-        if not force_refresh:
-            cached = self._get_cached_response(dataset_name, system_prompt, db_template, question)
-            if cached is not None:
-                try:
-                    # Attempt to parse as JSON for structured logs
-                    data = json.loads(cached)
-                    if isinstance(data, dict) and "content" in data:
-                        logger.info("Using structured cached response from database.")
-                        return data
-                except json.JSONDecodeError:
-                    pass
-                
-                logger.info("Using legacy cached response from database.")
-                return {"content": cached, "logprobs": None, "finish_reason": None}
 
         try:
             messages = [
@@ -242,66 +185,74 @@ class ModelEvaluator:
         dataset_name: str = "unknown",
         max_workers: int = 5,
         force_refresh: bool = False
-    ) -> List[Dict[str, Any]]:
+    ) -> None:
         """
         Evaluates the model's accuracy on a given dataset in parallel.
+        Filters out already cached items if not force_refresh.
         """
-        total_count = len(dataset)
-        results: list = [None] * total_count # Maintain order
-        
         system_prompt = (
             "You are an expert in Cypher query language. "
             "Translate the natural language question into a Cypher query. "
             "Return only the raw Cypher query, without markdown blocks or explanations."
         )
+        db_template = prompt_template.replace("{question}", "{{question}}")
 
-        def process_item(index: int, entry: Dict[str, Any]) -> Dict[str, Any]:
+        filtered_dataset = dataset
+        if not force_refresh:
             try:
-                logger.debug(f"Handling item {index+1}/{total_count} (UID: {entry.get('uid')})")
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    
+                    # Get IDs
+                    cursor.execute("SELECT id FROM system_prompts WHERE content = ?", (system_prompt,))
+                    sys_res = cursor.fetchone()
+                    cursor.execute("SELECT id FROM user_prompt_templates WHERE content = ?", (db_template,))
+                    tmpl_res = cursor.fetchone()
+                    
+                    if sys_res and tmpl_res:
+                        cursor.execute('''
+                            SELECT question FROM ai_cache 
+                            WHERE model_name = ? AND dataset_name = ? AND system_prompt_id = ? AND template_id = ? AND include_reasoning = ?
+                        ''', (self.model_name, dataset_name, sys_res[0], tmpl_res[0], int(self.include_reasoning)))
+                        cached_questions = {row[0] for row in cursor.fetchall()}
+                        
+                        filtered_dataset = [
+                            entry for entry in dataset 
+                            if entry.get("question", "") not in cached_questions
+                        ]
+                        
+                        skipped = len(dataset) - len(filtered_dataset)
+                        if skipped > 0:
+                            logger.info(f"Skipping {skipped} already cached items.")
+            except sqlite3.Error as e:
+                logger.warning(f"Failed to check cache batch: {e}")
+
+        total_to_process = len(filtered_dataset)
+        if total_to_process == 0:
+            logger.info("All items are already cached. Nothing to process.")
+            return
+
+        def process_item(index: int, entry: Dict[str, Any]) -> None:
+            try:
+                logger.debug(f"Handling item {index+1}/{total_to_process} (UID: {entry.get('uid')})")
                 question = entry.get("question", entry.get("utterance", ""))
-                model_output = self.call_model(question, prompt_template, system_prompt, dataset_name=dataset_name, force_refresh=force_refresh)
-                
-                content = model_output["content"]
-                thinking = ""
-                answer = content
-                
-                if "</think>" in content:
-                    parts = content.split("</think>", 1)
-                    thinking = parts[0].replace("<think>", "").strip()
-                    answer = parts[1].strip()
-                
-                answer = re.sub(r'^```(cypher)?\n?', '', answer, flags=re.IGNORECASE | re.MULTILINE)
-                answer = re.sub(r'\n?```$', '', answer, flags=re.IGNORECASE | re.MULTILINE)
-                answer = answer.strip()
-                
-                return {
-                    **entry, 
-                    "thinking": thinking,
-                    "answer": answer,
-                    "logprobs": model_output.get("logprobs"),
-                    "finish_reason": model_output.get("finish_reason")
-                }
+                self.call_model(question, prompt_template, system_prompt, dataset_name=dataset_name, force_refresh=force_refresh)
             except Exception as e:
                 logger.error(f"Failed to evaluate item {index+1}: {str(e)}")
-                return {**entry, "thinking": "", "answer": "", "logprobs": None, "finish_reason": "error"}
 
-        logger.info(f"Starting evaluation with {max_workers} workers...")
+        logger.info(f"Starting evaluation of {total_to_process} items with {max_workers} workers...")
         
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Schedule all tasks
-            future_to_index = {
-                executor.submit(process_item, i, entry): i 
-                for i, entry in enumerate(dataset)
-            }
+            futures = [
+                executor.submit(process_item, i, entry) 
+                for i, entry in enumerate(filtered_dataset)
+            ]
             
             completed = 0
-            for future in as_completed(future_to_index):
-                index = future_to_index[future]
-                results[index] = future.result()
+            for _ in as_completed(futures):
                 completed += 1
-                logger.info(f"Progress: {completed}/{total_count} items completed.")
-        
-        return results
+                if completed % 5 == 0 or completed == total_to_process:
+                    logger.info(f"Progress: {completed}/{total_to_process} items completed.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on Cypher generation.")
@@ -353,7 +304,7 @@ if __name__ == "__main__":
     dataset_name = os.path.basename(args.dataset) if args.dataset else "unknown"
 
     try:
-        results = evaluator.get_answers(
+        evaluator.get_answers(
             dataset=dataset, 
             prompt_template=template, 
             dataset_name=dataset_name,
@@ -361,8 +312,8 @@ if __name__ == "__main__":
             force_refresh=args.force
         )
         
-        # Final logging instead of saving to JSON
-        logger.info(f"Evaluation complete for {len(results)} items.")
+        # Final logging
+        logger.info("Evaluation process complete.")
         
     except Exception as e:
         logger.error(f"Error during evaluation: {e}")
