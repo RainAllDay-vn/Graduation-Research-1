@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.22.0"
 app = marimo.App()
 
 
@@ -13,8 +13,31 @@ def _():
     import numpy as np
     import os
     import re
+    import logging
+    import ast
+    from typing import Dict, Any, Tuple, List
+    from CyVer import SyntaxValidator
+    from neo4j import GraphDatabase, basic_auth
 
-    return mo, os, pd, plt, sqlite3
+    # Silence verbose Neo4j notifications
+    logging.getLogger("neo4j").setLevel(logging.ERROR)
+    return (
+        Any,
+        Dict,
+        GraphDatabase,
+        List,
+        SyntaxValidator,
+        Tuple,
+        ast,
+        basic_auth,
+        mo,
+        np,
+        os,
+        pd,
+        plt,
+        re,
+        sqlite3,
+    )
 
 
 @app.cell
@@ -317,6 +340,248 @@ def _(df_reason, plt):
 
         plt.tight_layout()
 
+    _fig
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
+    ## Cypher Query Syntax Validation (CyVer AST)
+
+    We validate all generated Cypher queries using **CyVer**'s `SyntaxValidator`, which uses the openCypher ANTLR grammar under the hood to perform real AST-based syntax validation.
+
+    This analysis determines what percentage of the model's generated queries are syntactically invalid.
+    """)
+    return
+
+
+@app.cell
+def _(
+    Any,
+    Dict,
+    GraphDatabase,
+    SyntaxValidator,
+    Tuple,
+    basic_auth,
+    df_no_reason,
+    df_reason,
+):
+    # Connect to Neo4j (required by CyVer)
+    _uri: str = "bolt://localhost:7687"
+    _auth: Tuple[str, str] = basic_auth("neo4j", "password-to-kg")
+    _driver = GraphDatabase.driver(_uri, auth=_auth)
+
+    _validator: SyntaxValidator = SyntaxValidator(_driver, check_multilabeled_nodes=False)
+
+    def _validate_query(query_text: str) -> Dict[str, Any]:
+        """Validate a single Cypher query using CyVer SyntaxValidator."""
+        if not query_text or not isinstance(query_text, str) or not query_text.strip():
+            return {"is_valid": False, "error": "Empty or None query"}
+        try:
+            # CyVer returns (is_valid: bool, metadata: dict)
+            _is_valid: bool
+            _metadata: Dict[str, Any]
+            _is_valid, _metadata = _validator.validate(query_text.strip())
+            return {"is_valid": _is_valid, "error": "" if _is_valid else str(_metadata)}
+        except Exception as e:
+            return {"is_valid": False, "error": f"Exception: {str(e)}"}
+
+    # --- Process Reasoning OFF Subset (up to 200) ---
+    _count_no: int = min(200, len(df_no_reason))
+    df_no_sample = df_no_reason.sample(n=_count_no, random_state=42).copy() if _count_no > 0 else df_no_reason.copy()
+
+    _results_no = df_no_sample['content'].apply(_validate_query)
+    df_no_sample['is_valid'] = _results_no.apply(lambda x: x['is_valid'])
+    df_no_sample['validation_error'] = _results_no.apply(lambda x: x['error'])
+
+    # --- Process Reasoning ON Subset (up to 200) ---
+    _count_re: int = min(200, len(df_reason))
+    df_re_sample = df_reason.sample(n=_count_re, random_state=42).copy() if _count_re > 0 else df_reason.copy()
+
+    _results_re = df_re_sample['query_text'].apply(_validate_query)
+    df_re_sample['is_valid'] = _results_re.apply(lambda x: x['is_valid'])
+    df_re_sample['validation_error'] = _results_re.apply(lambda x: x['error'])
+
+    _driver.close()
+
+    # Compute Statistics for Samples
+    total_no: int = len(df_no_sample)
+    valid_no: int = int(df_no_sample['is_valid'].sum())
+    invalid_no: int = total_no - valid_no
+    pct_invalid_no: float = (invalid_no / total_no * 100) if total_no > 0 else 0.0
+
+    total_re: int = len(df_re_sample)
+    valid_re: int = int(df_re_sample['is_valid'].sum())
+    invalid_re: int = total_re - valid_re
+    pct_invalid_re: float = (invalid_re / total_re * 100) if total_re > 0 else 0.0
+    return (
+        df_no_sample,
+        df_re_sample,
+        invalid_no,
+        invalid_re,
+        pct_invalid_no,
+        pct_invalid_re,
+        total_no,
+        total_re,
+        valid_no,
+        valid_re,
+    )
+
+
+@app.cell
+def _(
+    invalid_no: int,
+    invalid_re: int,
+    mo,
+    pct_invalid_no: float,
+    pct_invalid_re: float,
+    total_no: int,
+    total_re: int,
+    valid_no: int,
+    valid_re: int,
+):
+    mo.md(f"""
+    ### Validation Results Summary (Subset Sample: n=200 per group)
+
+    | Reasoning Mode | Total Sample | Valid Queries | Invalid Queries | % Invalid |
+    | :--- | :--- | :--- | :--- | :--- |
+    | **Reasoning OFF** | {total_no} | {valid_no} | {invalid_no} | **{pct_invalid_no:.2f}%** |
+    | **Reasoning ON** | {total_re} | {valid_re} | {invalid_re} | **{pct_invalid_re:.2f}%** |
+    """)
+    return
+
+
+@app.cell
+def _(df_no_sample, df_re_sample, mo):
+    # Sample invalid queries for both
+    # Filter only rows with is_valid=False
+    _invalid_off_df = df_no_sample[df_no_sample['is_valid'] == False]
+    _invalid_on_df = df_re_sample[df_re_sample['is_valid'] == False]
+
+    _invalid_off = _invalid_off_df[['question', 'content', 'validation_error']].head(10)
+    _invalid_on = _invalid_on_df[['question', 'query_text', 'validation_error']].head(10)
+
+    _display = mo.vstack([
+        mo.md("### Sample Invalid Queries: Reasoning OFF"),
+        mo.ui.table(_invalid_off) if not _invalid_off.empty else mo.md("_No invalid queries found._"),
+        mo.md("### Sample Invalid Queries: Reasoning ON"),
+        mo.ui.table(_invalid_on) if not _invalid_on.empty else mo.md("_No invalid queries found._")
+    ])
+    _display
+    return
+
+
+@app.cell
+def _(Any, Dict, List, ast, df_no_sample, df_re_sample, pd, re):
+    def _clean_error(error_str: str) -> str:
+        """Parse stringified list of errors and aggressively group by core category."""
+        if not error_str or error_str == "Empty or None query":
+            return error_str
+        try:
+            # Handle CyVer's string representation of list of dicts
+            _data: List[Dict[str, Any]] = ast.literal_eval(error_str)
+            if not _data or not isinstance(_data, list):
+                return error_str
+            _desc: str = _data[0].get('description', '')
+            _desc_lower: str = _desc.lower()
+
+            # Broad category matching
+            if "invalid input" in _desc_lower or "extraneous input" in _desc_lower or "mismatched input" in _desc_lower:
+                return "Syntax Error: Invalid or unexpected input"
+            if "unknown function" in _desc_lower:
+                return "Semantic Error: Unknown function"
+            if "variable" in _desc_lower and "not defined" in _desc_lower:
+                return "Semantic Error: Variable not defined"
+            if "type mismatch" in _desc_lower:
+                return "Semantic Error: Type mismatch"
+            if "return can only be used at the end" in _desc_lower:
+                return "Syntax Error: RETURN must be at query end"
+            if "query cannot conclude with" in _desc_lower:
+                return "Syntax Error: Query cannot conclude with clause"
+            if "all sub queries in an union" in _desc_lower:
+                return "Semantic Error: UNION return columns mismatch"
+            if "missing" in _desc_lower and "expected" in _desc_lower:
+                return "Syntax Error: Missing expected token"
+
+            # Fallback: remove anything in double quotes (usually query extracts), then take text before colon
+            _clean: str = re.sub(r'\(line \d+, column \d+ \(offset: \d+\)\)', '', _desc)
+            _clean = re.sub(r'".*?"', '', _clean).strip()
+            _clean = _clean.split(':')[0].strip().replace('\n', ' ')
+
+            if _clean:
+                return _clean[0].upper() + _clean[1:]
+            return "Unknown Error Category"
+
+        except (ValueError, SyntaxError, Exception):
+            return error_str
+
+    # Process Reasoning OFF errors
+    _err_no = df_no_sample[df_no_sample['is_valid'] == False]['validation_error'].apply(_clean_error)
+    # Process Reasoning ON errors
+    _err_re = df_re_sample[df_re_sample['is_valid'] == False]['validation_error'].apply(_clean_error)
+
+    # Combine for global ranking
+    err_ranking = pd.concat([_err_no, _err_re]).value_counts().head(15)
+    return (err_ranking,)
+
+
+@app.cell
+def _(err_ranking, mo, plt):
+    # Ranking Chart of Common Syntax Errors
+    if err_ranking.empty:
+        _fig = mo.md("_No syntax errors found in the sample subsets._")
+    else:
+        _fig, _ax = plt.subplots(figsize=(14, 8))
+
+        # Truncate long error descriptions so they fit in the figure margins
+        _safe_index = [
+            (str(lbl)[:75] + '...') if len(str(lbl)) > 75 else str(lbl)
+            for lbl in err_ranking.index
+        ]
+        _plot_series = err_ranking.copy()
+        _plot_series.index = _safe_index
+
+        # Sort so most frequent is at the top
+        _plot_series.iloc[::-1].plot(kind='barh', ax=_ax, color='salmon', alpha=0.9, edgecolor='darkred')
+
+        _ax.set_title("Most Common Cypher Syntax Errors (Top 15 Pattern Ranking)")
+        _ax.set_xlabel("Frequency (Combined Sample n=400)")
+        _ax.set_ylabel("Error Description (Cleaned)")
+
+        # Add labels to the end of bars for clarity
+        for i, v in enumerate(_plot_series.iloc[::-1]):
+            _ax.text(v + 0.1, i, str(int(v)), color='darkred', va='center', fontweight='bold')
+
+        _ax.grid(axis='x', linestyle='--', alpha=0.3)
+        plt.tight_layout()
+
+    _fig
+    return
+
+
+@app.cell
+def _(invalid_no: int, invalid_re: int, np, plt, valid_no: int, valid_re: int):
+    # Grouped Bar Chart: Valid vs Invalid Comparison (Sampled Subset)
+    _categories: list[str] = ['Reasoning OFF', 'Reasoning ON']
+    _valid_counts: list[int] = [valid_no, valid_re]
+    _invalid_counts: list[int] = [invalid_no, invalid_re]
+
+    _x: np.ndarray = np.arange(len(_categories))
+    _width: float = 0.35
+
+    _fig, _ax = plt.subplots(figsize=(10, 6))
+    _ax.bar(_x - _width/2, _valid_counts, _width, label='Valid', color='teal', alpha=0.8)
+    _ax.bar(_x + _width/2, _invalid_counts, _width, label='Invalid', color='crimson', alpha=0.8)
+
+    _ax.set_ylabel('Count')
+    _ax.set_title('Cypher Query Syntax Validation Comparison')
+    _ax.set_xticks(_x)
+    _ax.set_xticklabels(_categories)
+    _ax.legend()
+    _ax.grid(axis='y', alpha=0.3)
+
+    plt.tight_layout()
     _fig
     return
 
