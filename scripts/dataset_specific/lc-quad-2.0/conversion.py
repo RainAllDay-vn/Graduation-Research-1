@@ -6,7 +6,7 @@ import time
 import re
 from typing import List, Dict, Tuple, Set
 
-# Discover project root (3 levels up from scripts/conversion_script/lc-quad-2.0/)
+# Discover project root (3 levels up from scripts/dataset_specific/lc-quad-2.0/)
 BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 if BASE_PATH not in sys.path:
     sys.path.insert(0, BASE_PATH)
