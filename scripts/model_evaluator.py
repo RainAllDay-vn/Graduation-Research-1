@@ -22,7 +22,7 @@ class ModelEvaluator:
     A class for evaluating model accuracy with SQLite-based caching.
     The cache key is (model_name, dataset_name, system_prompt_id, template_id, question, include_reasoning).
     """
-    def __init__(self, model_name: str, api_key: str, api_base: Optional[str] = None, provider: Optional[str] = None, db_path: str = "ai_cache.db", logprobs: bool = False, top_logprobs: int = 5, include_reasoning: bool = True):
+    def __init__(self, model_name: str, api_key: str, api_base: Optional[str] = None, provider: Optional[str] = None, db_path: str = "cache/ai_cache.db", logprobs: bool = False, top_logprobs: int = 5, include_reasoning: bool = True):
 
         """
         Initializes the ModelEvaluator with model details and a database path.
@@ -179,8 +179,15 @@ class ModelEvaluator:
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
 
-    @staticmethod
-    def fetch_cached_responses(db_path: str, model_name: str, dataset_name: str, include_reasoning: int) -> pd.DataFrame:
+    def fetch_cached_responses(
+        self, 
+        model_name: str, 
+        dataset_name: str, 
+        include_reasoning: int,
+        system_prompt_id: Optional[int] = None,
+        template_id: Optional[int] = None,
+        questions: Optional[List[str]] = None
+    ) -> pd.DataFrame:
         """
         Fetches cached model responses from the SQLite database.
         Returns a pandas DataFrame containing the raw results.
@@ -195,8 +202,23 @@ class ModelEvaluator:
           AND include_reasoning = ?
           AND json_valid(response)
         """
-        with sqlite3.connect(db_path) as conn:
-            return pd.read_sql_query(query, conn, params=(model_name, dataset_name, include_reasoning))
+        params = [model_name, dataset_name, include_reasoning]
+
+        if system_prompt_id is not None:
+            query += " AND system_prompt_id = ?"
+            params.append(system_prompt_id)
+
+        if template_id is not None:
+            query += " AND template_id = ?"
+            params.append(template_id)
+
+        if questions:
+            placeholders = ", ".join(["?"] * len(questions))
+            query += f" AND question IN ({placeholders})"
+            params.extend(questions)
+
+        with sqlite3.connect(self.db_path) as conn:
+            return pd.read_sql_query(query, conn, params=params)
 
     def get_answers(
         self, 
@@ -317,6 +339,7 @@ if __name__ == "__main__":
         top_logprobs=args.top_logprobs,
         include_reasoning=args.thinking
     )
+    evaluator.init_db()
 
     template = "Translate this question into a Cypher query:\nQuestion: {question}"
     

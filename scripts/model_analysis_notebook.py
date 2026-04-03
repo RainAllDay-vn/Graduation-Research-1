@@ -19,7 +19,6 @@ def _():
     from CyVer import SyntaxValidator
     from neo4j import GraphDatabase, basic_auth
     from model_evaluator import ModelEvaluator
-    fetch_cached_responses = ModelEvaluator.fetch_cached_responses
 
     # Silence verbose Neo4j notifications
     logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -39,7 +38,7 @@ def _():
         plt,
         re,
         sqlite3,
-        fetch_cached_responses,
+        ModelEvaluator,
     )
 
 
@@ -71,15 +70,15 @@ def _(mo):
 
 
 @app.cell
-def _(fetch_cached_responses, os, pd):
-    _db_path = os.path.join(os.path.dirname(__file__), '..', 'cache', 'ai_cache.db')
+def _(ModelEvaluator, pd):
+    evaluator = ModelEvaluator(model_name='dummy', api_key='')
 
     # Load reasoning=0 data with all fields
-    df_no_reason = fetch_cached_responses(_db_path, 'Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=0)
+    df_no_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=0)
     df_no_reason['query_length'] = pd.to_numeric(df_no_reason['content'].str.len(), errors='coerce')
 
     # Load reasoning=1 data with all fields
-    df_reason = fetch_cached_responses(_db_path, 'Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=1)
+    df_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=1)
     df_reason.rename(columns={'content': 'full_content'}, inplace=True)
 
     def _extract_parts(text):
