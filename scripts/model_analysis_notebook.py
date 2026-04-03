@@ -586,5 +586,77 @@ def _(invalid_no: int, invalid_re: int, np, plt, valid_no: int, valid_re: int):
     return
 
 
+@app.cell
+def _(
+    df_no_reason,
+    df_reason,
+    mo,
+    pct_invalid_no: float,
+    pct_invalid_re: float,
+    total_no: int,
+    total_re: int,
+    valid_no: int,
+    valid_re: int,
+):
+    _avg_len_no = df_no_reason['query_length'].mean() if not df_no_reason.empty else 0
+    _avg_len_re = df_reason['query_length'].mean() if not df_reason.empty else 0
+    _avg_think_len = df_reason['thinking_length'].mean() if not df_reason.empty else 0
+
+    # Calculate the improvement or degradation in validity
+    _diff_validity = pct_invalid_no - pct_invalid_re
+    _validity_msg = ""
+    if _diff_validity > 0:
+        _validity_msg = f"Reasoning ON improved syntax validity by **{_diff_validity:.2f}%**."
+    elif _diff_validity < 0:
+        _validity_msg = f"Reasoning ON actually increased syntax errors by **{abs(_diff_validity):.2f}%**."
+    else:
+        _validity_msg = "Reasoning mode had no impact on syntax validity percentage."
+
+
+    mo.md(f"""
+    ## Conclusion: Key Discoveries
+
+    Based on the analysis of **Qwen/Qwen3.5-4B** on the **LC-QuAD 2.0** dataset, we have observed the following:
+
+    ### 1. Structural Complexity
+    - **Query Length:** Enabling reasoning leads to an average query length of **{_avg_len_re:.1f}** characters, compared to **{_avg_len_no:.1f}** characters when reasoning is disabled. 
+    - **Thinking Overhead:** The model generates an average of **{_avg_think_len:.1f}** characters of internal reasoning before outputting the final Cypher query.
+
+    ### 2. Syntactic Reliability (Subset n=200)
+    - **Reasoning OFF:** Successfully generated **{valid_no}** valid queries out of {total_no} (**{100-pct_invalid_no:.2f}%** success rate).
+    - **Reasoning ON:** Successfully generated **{valid_re}** valid queries out of {total_re} (**{100-pct_invalid_re:.2f}%** success rate).
+    - **Impact:** {_validity_msg}
+
+    ### Final Takeaway
+    The data suggests that while the internal reasoning process (thinking) adds significant token overhead, it {"significantly" if abs(_diff_validity) > 5 else "slightly"} affects the grammatical correctness of the resulting Cypher. This analysis serves as a baseline for further ontology-constrained fine-tuning.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(f"""
+    ## Next Steps & Future Work
+
+    To improve the efficiency and reliability of the cypher query generation, the following objectives have been identified:
+
+    ### 1. Optimize Reasoning Efficiency
+    Reduce the character length of the reasoning process (`<think>` block) without compromising query quality. This can be achieved through:
+    - **Prompt Engineering:** Refining instructions to encourage "concise but logical" derivations.
+
+    ### 2. Minimize Error Frequency
+    Address common syntax and semantic errors discovered in the current benchmarks:
+    - **Prompt Engineering:** Add examples or guidelines to avoid common errors.
+    - **Self-Correction:** Allow the LLM to retry if the query is invalid.
+    - **Ontology Awareness:** Injecting more specific medical ontology constraints into the system prompt.
+    - **Error-Correcting Fine-Tuning:** Training on a "synthetic correction" dataset where the model learns to fix its own previous mistakes.
+
+    ### 3. Enforce Structured Query Generation
+    Standardize the model's output format to ensure maximum parseability:
+    - **Strict Query Format:** Make components of Cypher query (like MATCH, RETURN, ...) follow a strict order to allow better parsing.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
