@@ -18,6 +18,8 @@ def _():
     from typing import Dict, Any, Tuple, List
     from CyVer import SyntaxValidator
     from neo4j import GraphDatabase, basic_auth
+    from model_evaluator import ModelEvaluator
+    fetch_cached_responses = ModelEvaluator.fetch_cached_responses
 
     # Silence verbose Neo4j notifications
     logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -37,6 +39,7 @@ def _():
         plt,
         re,
         sqlite3,
+        fetch_cached_responses,
     )
 
 
@@ -68,36 +71,16 @@ def _(mo):
 
 
 @app.cell
-def _(os, pd, sqlite3):
+def _(fetch_cached_responses, os, pd):
     _db_path = os.path.join(os.path.dirname(__file__), '..', 'cache', 'ai_cache.db')
-    _conn = sqlite3.connect(_db_path)
 
     # Load reasoning=0 data with all fields
-    _query_no = """
-    SELECT 
-        *,
-        json_extract(response, '$.content') AS content
-    FROM ai_cache 
-    WHERE model_name = 'Qwen/Qwen3.5-4B' 
-      AND dataset_name = 'lc-quad-2.0' 
-      AND include_reasoning = 0
-      AND json_valid(response)
-    """
-    df_no_reason = pd.read_sql_query(_query_no, _conn)
+    df_no_reason = fetch_cached_responses(_db_path, 'Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=0)
     df_no_reason['query_length'] = pd.to_numeric(df_no_reason['content'].str.len(), errors='coerce')
 
     # Load reasoning=1 data with all fields
-    _query_re = """
-    SELECT 
-        *,
-        json_extract(response, '$.content') AS full_content
-    FROM ai_cache 
-    WHERE model_name = 'Qwen/Qwen3.5-4B' 
-      AND dataset_name = 'lc-quad-2.0' 
-      AND include_reasoning = 1
-      AND json_valid(response)
-    """
-    df_reason = pd.read_sql_query(_query_re, _conn)
+    df_reason = fetch_cached_responses(_db_path, 'Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=1)
+    df_reason.rename(columns={'content': 'full_content'}, inplace=True)
 
     def _extract_parts(text):
         if not text:
@@ -126,7 +109,6 @@ def _(os, pd, sqlite3):
     df_reason['thinking_length'] = pd.to_numeric(df_reason['thinking_text'].str.len(), errors='coerce')
     df_reason['query_length'] = pd.to_numeric(df_reason['query_text'].str.len(), errors='coerce')
 
-    _conn.close()
     return df_no_reason, df_reason, invalid_response_count
 
 

@@ -4,6 +4,7 @@ import os
 import re
 import argparse
 import sqlite3
+import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, cast
 
@@ -177,6 +178,25 @@ class ModelEvaluator:
             error_msg = f"Failed to call model '{self.model_name}': {str(e)}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e
+
+    @staticmethod
+    def fetch_cached_responses(db_path: str, model_name: str, dataset_name: str, include_reasoning: int) -> pd.DataFrame:
+        """
+        Fetches cached model responses from the SQLite database.
+        Returns a pandas DataFrame containing the raw results.
+        """
+        query = """
+        SELECT 
+            *,
+            json_extract(response, '$.content') AS content
+        FROM ai_cache 
+        WHERE model_name = ? 
+          AND dataset_name = ? 
+          AND include_reasoning = ?
+          AND json_valid(response)
+        """
+        with sqlite3.connect(db_path) as conn:
+            return pd.read_sql_query(query, conn, params=(model_name, dataset_name, include_reasoning))
 
     def get_answers(
         self, 
