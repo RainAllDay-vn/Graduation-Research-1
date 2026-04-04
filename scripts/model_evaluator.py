@@ -339,7 +339,6 @@ if __name__ == "__main__":
         top_logprobs=args.top_logprobs,
         include_reasoning=args.thinking
     )
-    evaluator.init_db()
 
     template = "Translate this question into a Cypher query:\nQuestion: {question}"
     

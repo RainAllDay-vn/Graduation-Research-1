@@ -6,9 +6,12 @@ app = marimo.App()
 
 @app.cell
 def _():
+    import json
+    import os
     import marimo as mo
+    from model_evaluator import ModelEvaluator
 
-    return (mo,)
+    return ModelEvaluator, json, mo
 
 
 @app.cell
@@ -28,10 +31,7 @@ def _(mo):
 
 
 @app.cell
-def _():
-    import json
-    import os
-
+def _(json):
     dataset_path = r"d:\Graduation-Research-1\dataset\mini\train.json"
 
     with open(dataset_path, "r", encoding="utf-8") as f:
@@ -40,9 +40,30 @@ def _():
 
 
 @app.cell
-def _(mini_dataset, mo):
+def _(ModelEvaluator, mini_dataset):
+    # Extract questions for filtering
+    _questions = [entry.get("question", entry.get("utterance", "")) for entry in mini_dataset]
+
+    evaluator = ModelEvaluator(
+        model_name="Qwen/Qwen3.5-4B", 
+        api_key=""
+    )
+
+    # Fetch baseline responses from the teacher model (Qwen/Qwen3.5-4B with reasoning)
+    baseline_df = evaluator.fetch_cached_responses(
+        model_name="Qwen/Qwen3.5-4B",
+        dataset_name="lc-quad-2.0",
+        include_reasoning=1,
+        questions = _questions
+    )
+    return (baseline_df,)
+
+
+@app.cell
+def _(baseline_df, mini_dataset, mo):
     mo.md(f"""
     Loaded **{len(mini_dataset)}** entries from the mini dataset.
+    Found **{len(baseline_df)}** cached baseline responses.
     """)
     return
 
