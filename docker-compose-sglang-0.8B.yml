@@ -1,0 +1,38 @@
+services:
+  sglang-server:
+    image: lmsysorg/sglang:latest-runtime
+    container_name: sglang-qwen3.5-0.8b
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "18000:18000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - SGLANG_DISABLE_TELEMETRY=1
+    volumes:
+      # Persist downloaded models to a local ./models directory
+      - ./models:/workspace/models
+      # Keep HF metadata/cache to avoid redundant git operations
+      - hf_cache:/root/.cache/huggingface
+    command: >
+      python -m sglang.launch_server
+      --model-path Qwen/Qwen3.5-0.8B
+      --attention-backend flashinfer
+      --download-dir /workspace/models
+      --host 127.0.0.1
+      --port 18000
+      --context-length 16384
+      --mem-fraction-static 0.9
+      --max-running-requests 64
+      --cuda-graph-max-bs 64
+      --trust-remote-code
+    restart: unless-stopped
+
+volumes:
+  hf_cache:
