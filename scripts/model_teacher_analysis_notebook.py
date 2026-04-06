@@ -27,18 +27,16 @@ def _():
         Dict,
         GraphDatabase,
         List,
+        ModelEvaluator,
         SyntaxValidator,
         Tuple,
         ast,
         basic_auth,
         mo,
         np,
-        os,
         pd,
         plt,
         re,
-        sqlite3,
-        ModelEvaluator,
     )
 
 
@@ -102,12 +100,12 @@ def _(ModelEvaluator, pd):
 
     # Map valid parts back to the dataframe
     if not _valid_parts.empty:
-        df_reason.loc[_valid_parts.index, 'thinking_text'] = _valid_parts.apply(lambda x: x[0])
-        df_reason.loc[_valid_parts.index, 'query_text'] = _valid_parts.apply(lambda x: x[1])
+        df_reason = df_reason.loc[_valid_parts.index].copy()
+        df_reason['thinking_text'] = _valid_parts.apply(lambda x: x[0])
+        df_reason['query_text'] = _valid_parts.apply(lambda x: x[1])
 
     df_reason['thinking_length'] = pd.to_numeric(df_reason['thinking_text'].str.len(), errors='coerce')
     df_reason['query_length'] = pd.to_numeric(df_reason['query_text'].str.len(), errors='coerce')
-
     return df_no_reason, df_reason, invalid_response_count
 
 
