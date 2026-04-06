@@ -3,7 +3,7 @@ from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import importlib
 
-from scripts.models import Concept, Entity, Relation, DataLoader
+from models import Concept, Entity, Relation, DataLoader
 
 load_dotenv()
 

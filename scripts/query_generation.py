@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 
-from scripts.models import Entity
-from scripts.knowledge_graph import KnowledgeGraph
+from models import Entity
+from knowledge_graph import KnowledgeGraph
 
 database = KnowledgeGraph()
 

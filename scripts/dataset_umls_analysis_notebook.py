@@ -13,11 +13,11 @@ def _():
     import matplotlib.pyplot as plt
     from typing import Dict, Any, List, Optional
     from neo4j import Driver
-    from scripts.models import DataLoader
-    from scripts.knowledge_graph import KnowledgeGraph
-    from scripts.dataset_specific.umls.data_loader import get_loader
+    from models import DataLoader
+    from knowledge_graph import KnowledgeGraph
+    from dataset_specific.umls.data_loader import UmlsDataLoader
 
-    return Any, DataLoader, Dict, Driver, List, Optional, mo, np, os, pd, plt
+    return KnowledgeGraph, UmlsDataLoader, mo, os, pd
 
 
 @app.cell
@@ -32,12 +32,39 @@ def _(mo):
 
 
 @app.cell
-def _(os):
+def _(KnowledgeGraph, UmlsDataLoader, os):
     # Base configuration
     DATASET_ROOT = os.path.join("dataset", "umls", "extracted", "2025AB")
-    kg = KnowledgeGraph()
-    data_loader = get_loader(kg.driver, dataset_path=DATASET_ROOT)
-    return (DATASET_ROOT,)
+    _kg = KnowledgeGraph()
+    data_loader = UmlsDataLoader(_kg.driver, dataset_path=DATASET_ROOT)
+    return DATASET_ROOT, data_loader
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ---
+    # Section 1: Exploring `MRCONSO.RRF`
+
+    `MRCONSO.RRF` is the **Concept Names and Sources** file. It contains the strings (names) associated with each CUI (Concept Unique Identifier) and tracks which source vocabularies they come from.
+    """)
+    return
+
+
+@app.cell
+def _(DATASET_ROOT, data_loader, mo, pd):
+    headers = data_loader.load_headers_with_description(DATASET_ROOT, "MRCONSO.RRF")
+    _header_df = pd.DataFrame(headers, columns=["Column", "Description"])
+
+    _display_table = mo.vstack(
+        [
+            mo.md("### `MRCONSO.RRF` Column Definitions"),
+            mo.ui.table(_header_df, pagination=True),
+        ]
+    )
+    _display_table
+    return
+
 
 if __name__ == "__main__":
     app.run()

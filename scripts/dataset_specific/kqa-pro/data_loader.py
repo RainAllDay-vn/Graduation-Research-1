@@ -1,9 +1,9 @@
 import os
 import json
+import utils
 from typing import Optional
 from neo4j import Driver
-from scripts import utils
-from scripts.models import DataLoader
+from models import DataLoader
 
 class KqaProDataLoader(DataLoader):
     def __init__(self, driver: Driver, dataset_path: Optional[str] = None):

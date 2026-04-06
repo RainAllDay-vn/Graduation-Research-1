@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from typing import Optional
 from neo4j import Driver
-from scripts.models import DataLoader
+from models import DataLoader
 
 class UmlsDataLoader(DataLoader):
     def __init__(self, driver: Driver, dataset_path: Optional[str] = None):
@@ -77,11 +77,16 @@ class UmlsDataLoader(DataLoader):
             index_col=False, 
             usecols=range(8)
         )
-        
+        headers_description = headers_description[headers_description['FIL'] == file_name]
         headers = self.load_headers(extracted_path, file_name)   
+
+        result = []
         for header in headers:
-            header_info = headers_description[headers_description['COL'] == header]
-            print(f'{header}: {header_info["DES"].iloc[0]}')
+            match = headers_description[headers_description['COL'] == header]
+            description = match['DES'].iloc[0] if not match.empty else "No description available"
+            result.append((header, description))
+            
+        return result
 
 def get_loader(driver: Driver, dataset_path: str) -> UmlsDataLoader:
     return UmlsDataLoader(driver, dataset_path)
