@@ -8,18 +8,17 @@ class UmlsDataLoader(DataLoader):
     def __init__(self, driver: Driver, dataset_path: Optional[str] = None):
         if dataset_path is None:
             dataset_path = os.path.join('dataset', 'umls')
+
+        if not os.path.isdir(dataset_path):
+            raise FileNotFoundError(f"Dataset path '{dataset_path}' is not a directory.")
+        
+        self.extracted_path = os.path.join(dataset_path, 'extracted', '2025AB')
         super().__init__(driver, dataset_path)
 
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
-        if not os.path.isdir(self.dataset_path):
-            raise FileNotFoundError(f"Dataset path '{self.dataset_path}' is not a directory.")
-
-        # Updated to use self.dataset_path
-        extracted_path = os.path.join(self.dataset_path, 'extracted', '2025AB')
-
         self._clear_database()
-        self._insert_concepts(extracted_path)
+        self._insert_concepts()
 
     def _clear_database(self):
         print("Clearing database...")
@@ -34,26 +33,25 @@ class UmlsDataLoader(DataLoader):
             session.run(cleanup_query)
 
     def _insert_concepts(self, extracted_path: str):
-        print("Inserting concepts...")
-        headers = self.load_headers(extracted_path, 'MRCONSO.RRF')
-        file_path = os.path.join(extracted_path, 'META', 'MRCONSO.RRF')
-        reader = pd.read_csv(
+        pass
+
+    def load_file(self, folder_name: str, file_name: str, offset: int = 0, limit: int = 100_000):
+        headers = self.load_headers(file_name)
+        file_path = os.path.join(self.extracted_path, folder_name, file_name)
+        return pd.read_csv(
             file_path, 
             sep='|',
             names=headers,
             index_col=False, 
             low_memory=False, 
-            chunksize=500_000,
+            skiprows=offset,
+            nrows=limit,
             usecols=range(len(headers))
         )
 
-        for chunk in reader:
-            chunk.info(memory_usage='deep')
-            return
-
-    def load_headers(self, extracted_path: str, file_name: str):
+    def load_headers(self, file_name: str):
         print(f"Loading metadata for {file_name}...")
-        files_description_path = os.path.join(extracted_path, 'META', 'MRFILES.RRF')
+        files_description_path = os.path.join(self.extracted_path, 'META', 'MRFILES.RRF')
         files_description = pd.read_csv(
             files_description_path, 
             sep='|', 
@@ -66,10 +64,10 @@ class UmlsDataLoader(DataLoader):
         headers = file_description['FMT'].iloc[0].split(',')
         return headers
 
-    def load_headers_with_description(self, extracted_path: str, file_name: str):
+    def load_headers_with_description(self, file_name: str):
         print(f"Printing file info for {file_name}...")
         
-        headers_description_path = os.path.join(extracted_path, 'META', 'MRCOLS.RRF')
+        headers_description_path = os.path.join(self.extracted_path, 'META', 'MRCOLS.RRF')
         headers_description = pd.read_csv(
             headers_description_path, 
             sep='|', 
@@ -78,7 +76,7 @@ class UmlsDataLoader(DataLoader):
             usecols=range(8)
         )
         headers_description = headers_description[headers_description['FIL'] == file_name]
-        headers = self.load_headers(extracted_path, file_name)   
+        headers = self.load_headers(file_name)   
 
         result = []
         for header in headers:
