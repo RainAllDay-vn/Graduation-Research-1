@@ -6,3 +6,4 @@ models/
 ssh_key
 ssh_key.pub
 agents.md
+temp.py

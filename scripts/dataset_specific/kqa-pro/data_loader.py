@@ -3,13 +3,43 @@ import json
 from neo4j import Driver
 from scripts import utils
 
-def load(driver: Driver, dataset: dict):
+def load(driver: Driver, dataset_path: str):
     """Loads KQA-Pro data sequentially into the Neo4j database."""
+    if not os.path.isdir(dataset_path):
+        raise FileNotFoundError(f"Dataset path '{dataset_path}' is not a directory.")
+    
+    dataset_path = os.path.join(dataset_path, 'kb.json')
+    with open(dataset_path, encoding='utf-8') as f:
+        dataset = json.load(f)
+        
+    _clear_database(driver)
+    _create_constraints(driver)
     _insert_concepts(driver, dataset)
     _insert_concept_relations(driver, dataset)
     _insert_entities(driver, dataset)
     _insert_entity_concept_relations(driver, dataset)
     _insert_entity_relations(driver, dataset)
+
+def _clear_database(driver: Driver):
+    print("Clearing database...")
+    cleanup_query = """
+    CALL apoc.periodic.iterate(
+    "MATCH (n) RETURN n",
+    "DETACH DELETE n",
+    {batchSize: 2000, parallel: false}
+    )
+    """
+    with driver.session() as session:
+        session.run(cleanup_query)
+
+def _create_constraints(driver: Driver):
+    print("Creating constraints...")
+    query = '''
+    CREATE CONSTRAINT id_unique IF NOT EXISTS
+    FOR (b:Base) REQUIRE b.id IS UNIQUE;
+    '''
+    with driver.session() as session:
+        session.run(query)
 
 def _insert_concepts(driver: Driver, dataset: dict):
     print("Inserting concepts...")
@@ -106,7 +136,7 @@ def _insert_entity_relations(driver: Driver, dataset: dict):
     RETURN count(rel) AS total
     """
     
-    BATCH_SIZE = 10000
+    BATCH_SIZE = 2000
     with driver.session() as session:
         for i in range(0, len(data), BATCH_SIZE):
             batch = data[i:i+BATCH_SIZE]

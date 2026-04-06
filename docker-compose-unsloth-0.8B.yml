@@ -1,0 +1,32 @@
+services:
+  unsloth-studio:
+    image: unsloth/unsloth:latest
+    container_name: unsloth-studio-qwen3.5
+    ipc: host
+    shm_size: "8g"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - UNSLOTH_DISABLE_TELEMETRY=1
+    volumes:
+      # 🔗 Reuse the exact models folder from your SGLang setup
+      - ./models:/workspace/models
+      # 📁 Drop your training datasets here (JSONL/CSV supported)
+      - ./data:/workspace/data
+      # 💾 Fine-tuned LoRA/full checkpoints will save here
+      - ./outputs:/workspace/outputs
+      # 🔄 Shared HF cache for faster weight resolution
+      - hf_cache:/root/.cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  hf_cache:

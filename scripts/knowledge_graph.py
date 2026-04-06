@@ -1,11 +1,9 @@
 import os
-import json
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
-from scripts import utils
 import importlib
 
-from models import Concept, Entity, Relation
+from scripts.models import Concept, Entity, Relation
 
 load_dotenv()
 
@@ -32,31 +30,16 @@ class KnowledgeGraph:
             base_dir = os.path.dirname(os.path.abspath(__file__))
             dataset_path = os.path.abspath(os.path.join(base_dir, '..', dataset_path))
         
-        if os.path.isfile(dataset_path):
-            dataset_name = os.path.basename(os.path.dirname(dataset_path))
-        else:
-            dataset_name = os.path.basename(dataset_path)
+        dataset_name = os.path.basename(dataset_path)
 
-        if os.path.isdir(dataset_path):
-            dataset_path = os.path.join(dataset_path, 'kb.json')
-
-        with open(dataset_path, encoding='utf-8') as f:
-            dataset = json.load(f)
-
-        self._clear_database()
-        self._create_constraints()
-
-        loader = self._get_loader(dataset_name)
-        loader.load(self.driver, dataset)
-        
-        print(f"Knowledge graph loading complete using '{dataset_name}' loader.")
-
-    def _get_loader(self, dataset_name):
         module_path = f"scripts.dataset_specific.{dataset_name}.data_loader"
         try:
-            return importlib.import_module(module_path)
+            loader = importlib.import_module(module_path)
+            loader.load(self.driver, dataset_path)
         except ImportError as e:
             raise ValueError(f"No data loader found for dataset '{dataset_name}' (expected at {module_path}). Error: {e}")
+        
+        print(f"Knowledge graph loading complete using '{dataset_name}' loader.")
 
     def get_statistic(self):
         """Returns statistics of the knowledge graph."""
@@ -167,28 +150,6 @@ class KnowledgeGraph:
                 target=target,
                 qualifiers={}
             )
-
-    def _clear_database(self):
-        print("Clearing database...")
-        cleanup_query = """
-        CALL apoc.periodic.iterate(
-        "MATCH (n) RETURN n",
-        "DETACH DELETE n",
-        {batchSize: 10000, parallel: false}
-        )
-        """
-        with self.driver.session() as session:
-            session.run(cleanup_query)
-
-    def _create_constraints(self):
-        print("Creating constraints...")
-        query = '''
-        CREATE CONSTRAINT id_unique IF NOT EXISTS
-        FOR (b:Base) REQUIRE b.id IS UNIQUE;
-        '''
-        with self.driver.session() as session:
-            session.run(query)
-
 
 if __name__ == "__main__":
     knowledge_graph = KnowledgeGraph()
