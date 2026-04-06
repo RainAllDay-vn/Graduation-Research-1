@@ -45,13 +45,13 @@ def _():
 @app.cell
 def _(mo):
     mo.md("""
-    # Model Analysis: Reasoning Performance Comparison
+    # Model Analysis: Reasoning Performance
 
-    This notebook analyzes and compares the performance of **Qwen/Qwen3.5-0.8B** on the **LC-QuAD 2.0** dataset, specifically focusing on the difference between responses generated with and without reasoning enabled.
+    This notebook analyzes the performance of **Qwen/Qwen3.5-0.8B** on the **LC-QuAD 2.0** dataset when reasoning is enabled.
 
     ### Key Objectives:
-    - Compare Cypher query character lengths.
     - Analyze the "thinking" process length for reasoning-enabled models.
+    - Validate Cypher query syntax for generated outputs.
     - Visualize distributions and identify potential outliers or patterns.
     """)
     return
@@ -63,8 +63,7 @@ def _(mo):
     ## Data Loading and Preparation
 
     We retrieve cached model responses from a SQLite database (`ai_cache.db`).
-    - For **Reasoning OFF**, we extract the JSON content directly.
-    - For **Reasoning ON**, we parse the content to separate the `<think>` reasoning block from the final Cypher query.
+    For **Reasoning ON**, we parse the content to separate the `<think>` reasoning block from the final Cypher query.
     """)
     return
 
@@ -72,10 +71,6 @@ def _(mo):
 @app.cell
 def _(ModelEvaluator, pd):
     evaluator = ModelEvaluator(model_name='dummy', api_key='')
-
-    # Load reasoning=0 data with all fields
-    df_no_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-0.8B', 'lc-quad-2.0', include_reasoning=0)
-    df_no_reason['query_length'] = pd.to_numeric(df_no_reason['content'].str.len(), errors='coerce')
 
     # Load reasoning=1 data with all fields
     df_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-0.8B', 'lc-quad-2.0', include_reasoning=1)
@@ -108,7 +103,7 @@ def _(ModelEvaluator, pd):
     df_reason['thinking_length'] = pd.to_numeric(df_reason['thinking_text'].str.len(), errors='coerce')
     df_reason['query_length'] = pd.to_numeric(df_reason['query_text'].str.len(), errors='coerce')
 
-    return df_no_reason, df_reason, invalid_response_count
+    return df_reason, invalid_response_count
 
 
 @app.cell
@@ -120,10 +115,8 @@ def _(mo):
 
 
 @app.cell
-def _(df_no_reason, df_reason, mo):
+def _(df_reason, mo):
     _preview = mo.vstack([
-        mo.md("### Preview: Reasoning OFF"),
-        mo.ui.table(df_no_reason.head()),
         mo.md("### Preview: Reasoning ON"),
         mo.ui.table(df_reason.head())
     ])
@@ -132,11 +125,10 @@ def _(df_no_reason, df_reason, mo):
 
 
 @app.cell
-def _(df_no_reason, df_reason, invalid_response_count, mo):
-    if df_no_reason.empty or df_reason.empty:
-        _stats_md = mo.md("# Missing data for comparison.")
+def _(df_reason, invalid_response_count, mo):
+    if df_reason.empty:
+        _stats_md = mo.md("# Missing data for analysis.")
     else:
-        _s_no = df_no_reason['query_length'].describe()
         _s_re = df_reason['query_length'].describe()
         _s_th = df_reason['thinking_length'].describe()
 
@@ -146,21 +138,20 @@ def _(df_no_reason, df_reason, invalid_response_count, mo):
             _invalid_msg = f"**Note:** {invalid_response_count} responses were skipped because they were missing `</think>` tags."
 
         _stats_md = mo.md(f"""
-        ## Summary Statistics: Reasoning OFF vs ON
+        ## Summary Statistics: Reasoning Performance
 
-        This table compares the **Cypher Query** character lengths:
-        - **OFF: Response**: The full response (query only) when reasoning is disabled.
-        - **ON: Query**: The extracted query section when reasoning is enabled.
+        This table analyzes the character lengths:
+        - **ON: Query**: The extracted query section.
         - **ON: Thinking**: The reasoning content extracted from `<think>` tags.
 
-        | Metric | OFF: Response | ON: Query | ON: Thinking |
-        | :--- | :--- | :--- | :--- |
-        | **Count** | {_s_no['count']:.0f} | {_s_re['count']:.0f} | {_s_th['count']:.0f} |
-        | **Mean** | {_s_no['mean']:.2f} | {_s_re['mean']:.2f} | {_s_th['mean']:.2f} |
-        | **Median (50%)** | {_s_no['50%']:.2f} | {_s_re['50%']:.2f} | {_s_th['50%']:.2f} |
-        | **Std Dev** | {_s_no['std']:.2f} | {_s_re['std']:.2f} | {_s_th['std']:.2f} |
-        | **Min** | {_s_no['min']:.0f} | {_s_re['min']:.0f} | {_s_th['min']:.0f} |
-        | **Max** | {_s_no['max']:.0f} | {_s_re['max']:.0f} | {_s_th['max']:.0f} |
+        | Metric | ON: Query | ON: Thinking |
+        | :--- | :--- | :--- |
+        | **Count** | {_s_re['count']:.0f} | {_s_th['count']:.0f} |
+        | **Mean** | {_s_re['mean']:.2f} | {_s_th['mean']:.2f} |
+        | **Median (50%)** | {_s_re['50%']:.2f} | {_s_th['50%']:.2f} |
+        | **Std Dev** | {_s_re['std']:.2f} | {_s_th['std']:.2f} |
+        | **Min** | {_s_re['min']:.0f} | {_s_th['min']:.0f} |
+        | **Max** | {_s_re['max']:.0f} | {_s_th['max']:.0f} |
 
         {_invalid_msg}
         """)
@@ -170,7 +161,7 @@ def _(df_no_reason, df_reason, invalid_response_count, mo):
 
 
 @app.cell
-def _(df_no_reason, df_reason, mo, pd):
+def _(df_reason, mo, pd):
     def _get_samples(df, text_col, n=5):
         if df.empty:
             return pd.DataFrame()
@@ -182,7 +173,6 @@ def _(df_no_reason, df_reason, mo, pd):
         # Random sample for a diverse view
         return _unique_df.sample(n=_n, random_state=42)
 
-    _samples_off = _get_samples(df_no_reason, 'content')
     _samples_on = _get_samples(df_reason, 'query_text')
 
     def _format_list(samples, text_col):
@@ -210,9 +200,6 @@ def _(df_no_reason, df_reason, mo, pd):
 
     These samples are selected at random from the dataset to provide a diverse look at the model's output quality.
 
-    ### Reasoning OFF (Average: {df_no_reason['query_length'].mean() if not df_no_reason.empty else 0:.1f} chars)
-    {_format_list(_samples_off, 'content')}
-
     ### Reasoning ON (Average: {df_reason['query_length'].mean() if not df_reason.empty else 0:.1f} chars)
     {_format_list(_samples_on, 'query_text')}
     """)
@@ -226,30 +213,24 @@ def _(mo):
     mo.md("""
     ## Distribution Analysis
 
-    The following visualizations compare the character length distributions of the generated Cypher queries.
-    Note that for reasoning-enabled models, we only measure the *final query* length, excluding the thinking process.
+    The following visualizations analyze the character length distributions of the generated Cypher queries when reasoning is enabled.
+    Note that we only measure the *final query* length, excluding the thinking process.
     """)
     return
 
 
 @app.cell
-def _(df_no_reason, df_reason, plt):
+def _(df_reason, plt):
     _fig = None
-    if not df_no_reason.empty and not df_reason.empty:
-        _l0, _u0 = df_no_reason['query_length'].quantile(0.05), df_no_reason['query_length'].quantile(0.95)
+    if not df_reason.empty:
         _l1, _u1 = df_reason['query_length'].quantile(0.05), df_reason['query_length'].quantile(0.95)
-
-        _shared_min = min(_l0, _l1)
-        _shared_max = max(_u0, _u1)
 
         _fig, _ax = plt.subplots(figsize=(10, 6))
 
-        _ax.hist(df_no_reason['query_length'], bins=50, range=(_shared_min, _shared_max), 
-                 alpha=0.5, label='Reasoning OFF (Full Response)', color='blue', edgecolor='darkblue')
-        _ax.hist(df_reason['query_length'], bins=50, range=(_shared_min, _shared_max), 
-                 alpha=0.5, label='Reasoning ON (Extracted Query)', color='orange', edgecolor='darkorange')
+        _ax.hist(df_reason['query_length'], bins=50, range=(_l1, _u1), 
+                 alpha=0.6, label='Reasoning ON (Extracted Query)', color='orange', edgecolor='darkorange')
 
-        _ax.set_title("Query Length Distribution: Reasoning OFF vs ON")
+        _ax.set_title("Query Length Distribution: Reasoning ON")
         _ax.set_xlabel("Query Length (characters)")
         _ax.set_ylabel("Frequency")
         _ax.legend()
@@ -261,23 +242,18 @@ def _(df_no_reason, df_reason, plt):
 
 
 @app.cell
-def _(df_no_reason, df_reason, plt):
+def _(df_reason, plt):
     _fig = None
-    if not df_no_reason.empty and not df_reason.empty:
-        # We still calculate the upper bound for the shared axis
-        _u0 = df_no_reason['query_length'].quantile(0.95)
+    if not df_reason.empty:
         _u1 = df_reason['query_length'].quantile(0.95)
-        _shared_max = max(_u0, _u1)
 
         _fig, _ax = plt.subplots(figsize=(10, 4))
-        _data = [df_no_reason['query_length'], df_reason['query_length']]
-        _ax.boxplot(_data, vert=False, labels=['Reasoning OFF (Full)', 'Reasoning ON (Query)'], 
-                    patch_artist=True)
+        _ax.boxplot(df_reason['query_length'], vert=False, labels=['Reasoning ON (Query)'], 
+                    patch_artist=True, boxprops=dict(facecolor='orange', alpha=0.6))
 
-        # Change the lower limit to 0
-        _ax.set_xlim(0, _shared_max) 
+        _ax.set_xlim(0, _u1) 
 
-        _ax.set_title("Response Length Box Comparison")
+        _ax.set_title("Response Length Box Plot (Reasoning ON)")
         _ax.set_xlabel("Length (characters)")
         _ax.grid(axis='x', alpha=0.3)
         plt.tight_layout()
@@ -328,6 +304,35 @@ def _(df_reason, plt):
 @app.cell
 def _(mo):
     mo.md("""
+    ## Short Query Investigation
+
+    There is a surprising number of Cypher queries with zero or very short length (<= 10 characters). This section investigates these cases to understand if the model stopped after reasoning or failed to generate the query block.
+    """)
+    return
+
+
+@app.cell
+def _(df_reason, mo):
+    # Filter for short queries (<= 10 chars)
+    _short_queries = df_reason[df_reason['query_length'] <= 10].copy()
+
+    # Sort by thinking length to see if longer reasoning leads to empty queries
+    _short_queries = _short_queries.sort_values(by='thinking_length', ascending=False)
+
+    _display_cols = ['question', 'query_text', 'thinking_text', 'thinking_length', 'query_length']
+    _table = mo.ui.table(_short_queries[_display_cols].head(20))
+
+    _content = mo.vstack([
+        mo.md(f"### Found {len(_short_queries)} queries with length <= 10"),
+        _table
+    ])
+    _content
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md("""
     ## Cypher Query Syntax Validation (CyVer AST)
 
     We validate all generated Cypher queries using **CyVer**'s `SyntaxValidator`, which uses the openCypher ANTLR grammar under the hood to perform real AST-based syntax validation.
@@ -345,7 +350,6 @@ def _(
     SyntaxValidator,
     Tuple,
     basic_auth,
-    df_no_reason,
     df_reason,
 ):
     # Connect to Neo4j (required by CyVer)
@@ -368,14 +372,6 @@ def _(
         except Exception as e:
             return {"is_valid": False, "error": f"Exception: {str(e)}"}
 
-    # --- Process Reasoning OFF Subset (up to 200) ---
-    _count_no: int = min(200, len(df_no_reason))
-    df_no_sample = df_no_reason.sample(n=_count_no, random_state=42).copy() if _count_no > 0 else df_no_reason.copy()
-
-    _results_no = df_no_sample['content'].apply(_validate_query)
-    df_no_sample['is_valid'] = _results_no.apply(lambda x: x['is_valid'])
-    df_no_sample['validation_error'] = _results_no.apply(lambda x: x['error'])
-
     # --- Process Reasoning ON Subset (up to 200) ---
     _count_re: int = min(200, len(df_reason))
     df_re_sample = df_reason.sample(n=_count_re, random_state=42).copy() if _count_re > 0 else df_reason.copy()
@@ -387,65 +383,45 @@ def _(
     _driver.close()
 
     # Compute Statistics for Samples
-    total_no: int = len(df_no_sample)
-    valid_no: int = int(df_no_sample['is_valid'].sum())
-    invalid_no: int = total_no - valid_no
-    pct_invalid_no: float = (invalid_no / total_no * 100) if total_no > 0 else 0.0
-
     total_re: int = len(df_re_sample)
     valid_re: int = int(df_re_sample['is_valid'].sum())
     invalid_re: int = total_re - valid_re
     pct_invalid_re: float = (invalid_re / total_re * 100) if total_re > 0 else 0.0
     return (
-        df_no_sample,
         df_re_sample,
-        invalid_no,
         invalid_re,
-        pct_invalid_no,
         pct_invalid_re,
-        total_no,
         total_re,
-        valid_no,
         valid_re,
     )
 
 
 @app.cell
 def _(
-    invalid_no: int,
     invalid_re: int,
     mo,
-    pct_invalid_no: float,
     pct_invalid_re: float,
-    total_no: int,
     total_re: int,
-    valid_no: int,
     valid_re: int,
 ):
     mo.md(f"""
-    ### Validation Results Summary (Subset Sample: n=200 per group)
+    ### Validation Results Summary (Subset Sample: n=200)
 
     | Reasoning Mode | Total Sample | Valid Queries | Invalid Queries | % Invalid |
     | :--- | :--- | :--- | :--- | :--- |
-    | **Reasoning OFF** | {total_no} | {valid_no} | {invalid_no} | **{pct_invalid_no:.2f}%** |
     | **Reasoning ON** | {total_re} | {valid_re} | {invalid_re} | **{pct_invalid_re:.2f}%** |
     """)
     return
 
 
 @app.cell
-def _(df_no_sample, df_re_sample, mo):
-    # Sample invalid queries for both
+def _(df_re_sample, mo):
+    # Sample invalid queries
     # Filter only rows with is_valid=False
-    _invalid_off_df = df_no_sample[df_no_sample['is_valid'] == False]
     _invalid_on_df = df_re_sample[df_re_sample['is_valid'] == False]
-
-    _invalid_off = _invalid_off_df[['question', 'content', 'validation_error']].head(10)
     _invalid_on = _invalid_on_df[['question', 'query_text', 'validation_error']].head(10)
 
     _display = mo.vstack([
-        mo.md("### Sample Invalid Queries: Reasoning OFF"),
-        mo.ui.table(_invalid_off) if not _invalid_off.empty else mo.md("_No invalid queries found._"),
         mo.md("### Sample Invalid Queries: Reasoning ON"),
         mo.ui.table(_invalid_on) if not _invalid_on.empty else mo.md("_No invalid queries found._")
     ])
@@ -454,7 +430,7 @@ def _(df_no_sample, df_re_sample, mo):
 
 
 @app.cell
-def _(Any, Dict, List, ast, df_no_sample, df_re_sample, pd, re):
+def _(Any, Dict, List, ast, df_re_sample, pd, re):
     def _clean_error(error_str: str) -> str:
         """Parse stringified list of errors and aggressively group by core category."""
         if not error_str or error_str == "Empty or None query":
@@ -497,13 +473,11 @@ def _(Any, Dict, List, ast, df_no_sample, df_re_sample, pd, re):
         except (ValueError, SyntaxError, Exception):
             return error_str
 
-    # Process Reasoning OFF errors
-    _err_no = df_no_sample[df_no_sample['is_valid'] == False]['validation_error'].apply(_clean_error)
     # Process Reasoning ON errors
     _err_re = df_re_sample[df_re_sample['is_valid'] == False]['validation_error'].apply(_clean_error)
 
-    # Combine for global ranking
-    err_ranking = pd.concat([_err_no, _err_re]).value_counts().head(15)
+    # Global ranking
+    err_ranking = _err_re.value_counts().head(15)
     return (err_ranking,)
 
 
@@ -526,8 +500,8 @@ def _(err_ranking, mo, plt):
         # Sort so most frequent is at the top
         _plot_series.iloc[::-1].plot(kind='barh', ax=_ax, color='salmon', alpha=0.9, edgecolor='darkred')
 
-        _ax.set_title("Most Common Cypher Syntax Errors (Top 15 Pattern Ranking)")
-        _ax.set_xlabel("Frequency (Combined Sample n=400)")
+        _ax.set_title("Most Common Cypher Syntax Errors (Reasoning ON)")
+        _ax.set_xlabel("Frequency (Sample n=200)")
         _ax.set_ylabel("Error Description (Cleaned)")
 
         # Add labels to the end of bars for clarity
@@ -542,25 +516,15 @@ def _(err_ranking, mo, plt):
 
 
 @app.cell
-def _(invalid_no: int, invalid_re: int, np, plt, valid_no: int, valid_re: int):
-    # Grouped Bar Chart: Valid vs Invalid Comparison (Sampled Subset)
-    _categories: list[str] = ['Reasoning OFF', 'Reasoning ON']
-    _valid_counts: list[int] = [valid_no, valid_re]
-    _invalid_counts: list[int] = [invalid_no, invalid_re]
+def _(invalid_re: int, np, plt, valid_re: int):
+    # Pie Chart: Valid vs Invalid (Reasoning ON)
+    _labels = ['Valid', 'Invalid']
+    _sizes = [valid_re, invalid_re]
+    _colors = ['teal', 'crimson']
 
-    _x: np.ndarray = np.arange(len(_categories))
-    _width: float = 0.35
-
-    _fig, _ax = plt.subplots(figsize=(10, 6))
-    _ax.bar(_x - _width/2, _valid_counts, _width, label='Valid', color='teal', alpha=0.8)
-    _ax.bar(_x + _width/2, _invalid_counts, _width, label='Invalid', color='crimson', alpha=0.8)
-
-    _ax.set_ylabel('Count')
-    _ax.set_title('Cypher Query Syntax Validation Comparison')
-    _ax.set_xticks(_x)
-    _ax.set_xticklabels(_categories)
-    _ax.legend()
-    _ax.grid(axis='y', alpha=0.3)
+    _fig, _ax = plt.subplots(figsize=(8, 8))
+    _ax.pie(_sizes, labels=_labels, autopct='%1.1f%%', startangle=140, colors=_colors, alpha=0.8)
+    _ax.set_title('Cypher Query Syntax Validation (Reasoning ON)')
 
     plt.tight_layout()
     _fig
