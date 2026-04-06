@@ -17,7 +17,7 @@ def _():
     from knowledge_graph import KnowledgeGraph
     from dataset_specific.umls.data_loader import UmlsDataLoader
 
-    return KnowledgeGraph, UmlsDataLoader, mo, os, pd
+    return KnowledgeGraph, UmlsDataLoader, mo, os, pd, plt
 
 
 @app.cell
@@ -122,7 +122,7 @@ def _(data_loader, mo, pd):
 def _(mo):
     mo.md(r"""
     ---
-    ## Subsection 1.1: The Core Hierarchy (From Broad to Specific)
+    ## 1.1 The Core Hierarchy (From Broad to Specific)
 
     This group has 4 different types of ID which help differentiate each concepts as well as their alternative names or description
     """)
@@ -212,6 +212,64 @@ def _(mo, top_lui_data):
         ]
     )
     _display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ---
+    ## 1.2: Language Distribution Analysis
+
+    This section analyzes the distribution of different languages in the sample set. The `LAT` column indicates the language of each term.
+    """)
+    return
+
+
+@app.cell
+def _(mo, pd, plt, sample):
+    _counts = sample["LAT"].value_counts().reset_index()
+    _counts.columns = ["Language", "Count"]
+
+    # Calculate percentage
+    _total = _counts["Count"].sum()
+    _counts["Percentage"] = (_counts["Count"] / _total) * 100
+
+    # Group languages with less than 1% to "Other"
+    _mask = _counts["Percentage"] < 1
+    _other_count = _counts[_mask]["Count"].sum()
+    _main_groups = _counts[~_mask].copy()
+
+    if _other_count > 0:
+        _other_row = pd.DataFrame({"Language": ["Other"], "Count": [_other_count], "Percentage": [(_other_count / _total) * 100]})
+        _main_groups = pd.concat([_main_groups, _other_row], ignore_index=True)
+
+    _fig, _ax = plt.subplots(figsize=(8, 8))
+    _ax.pie(_main_groups["Count"], labels=_main_groups["Language"], autopct='%1.1f%%', startangle=140, colors=plt.cm.Paired.colors)
+    _ax.set_title("Language Distribution (Minority Groups < 1% merged as 'Other')")
+
+    _display = mo.vstack(
+        [
+            mo.md("### Language Distribution Pie Chart"),
+            mo.as_html(_fig),
+            mo.md("### Detailed Language Counts"),
+            mo.ui.table(_main_groups[["Language", "Count", "Percentage"]]),
+        ]
+    )
+    plt.close(_fig)
+    _display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Observations:
+    *   **English Dominance**: English (`ENG`) is overwhelmingly the most common language in the sample, accounting for approximately **94.5%** of the entries.
+    *   **German (GER) Representation**: German is the second most frequent language at **5.1%**.
+    *   **Minority Languages**: Combined, all other languages account for less than **0.4%**.
+    *   **Metathesaurus Focus**: This distribution highlights the UMLS Metathesaurus's primary grounding in English terminology, which is critical when training or evaluating query generation models.
+    """)
     return
 
 
