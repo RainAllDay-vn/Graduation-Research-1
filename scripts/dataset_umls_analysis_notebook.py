@@ -37,7 +37,7 @@ def _(KnowledgeGraph, UmlsDataLoader, os):
     DATASET_ROOT = os.path.join("dataset", "umls")
     _kg = KnowledgeGraph()
     data_loader = UmlsDataLoader(_kg.driver, dataset_path=DATASET_ROOT)
-    return DATASET_ROOT, data_loader
+    return (data_loader,)
 
 
 @app.cell
@@ -107,7 +107,7 @@ def _(data_loader, mo, pd):
     _sample = _sample.iloc[0]
     _sample = _sample.values
     _header_df['Example Value'] = _sample
-    
+
     _display_table = mo.vstack(
         [
             mo.md("### `MRCONSO.RRF` Column Definitions"),
@@ -116,6 +116,104 @@ def _(data_loader, mo, pd):
     )
     _display_table
     return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ---
+    ## Subsection 1.1: The Core Hierarchy (From Broad to Specific)
+
+    This group has 4 different types of ID which help differentiate each concepts as well as their alternative names or description
+    """)
+    return
+
+
+@app.cell
+def _(data_loader, pd):
+    _total_rows = 1_000_000
+    sample = data_loader.load_file("META", "MRCONSO.RRF", offset=0, limit=_total_rows)
+
+    results = pd.DataFrame(
+        {
+            "Identifier": ["CUI (Concepts)", "LUI (Terms)", "SUI (Strings)", "AUI (Atoms)", "Total Rows"],
+            "Count": [
+                len(sample["CUI"].unique()),
+                len(sample["LUI"].unique()),
+                len(sample["SUI"].unique()),
+                len(sample["AUI"].unique()),
+                _total_rows,
+            ],
+        }
+    )
+    results["Count"] = results["Count"].apply(lambda x: f"{x:,}")
+    results
+    return (sample,)
+
+
+@app.cell
+def _(mo, sample):
+    # 1. Find CUI with largest number of AUIs
+    top_cui = sample.groupby("CUI")["AUI"].count().sort_values(ascending=False).index[0]
+    top_cui_data = sample[sample["CUI"] == top_cui]
+
+    _stats = {
+        "CUI": top_cui,
+        "Unique LUIs": len(top_cui_data["LUI"].unique()),
+        "Unique SUIs": len(top_cui_data["SUI"].unique()),
+        "Total AUIs": len(top_cui_data["AUI"]),
+        "Representative Name": top_cui_data["STR"].iloc[0],
+    }
+
+    _display = mo.vstack(
+        [
+            mo.md(f"### Analysis of CUI: `{top_cui}`"),
+            mo.md(f"We choose this concept as an example because this concept has the highest number of rows in the sample. Representative name: **{_stats['Representative Name']}**."),
+            mo.ui.table([_stats]),
+        ]
+    )
+    _display
+    return (top_cui_data,)
+
+
+@app.cell
+def _(mo, top_cui_data):
+    top_lui = top_cui_data["LUI"].value_counts().idxmax()
+    _top_lui_count = top_cui_data["LUI"].value_counts().max()
+    top_lui_data = top_cui_data[top_cui_data["LUI"] == top_lui]
+    _different_lui_data = top_cui_data.groupby("LUI").first()[["AUI", "STR"]]
+    _same_lui_data = top_lui_data.groupby("SUI").first()[["AUI", "STR"]]
+
+    _display = mo.vstack(
+        [
+            mo.md(f"This concept has {len(top_cui_data["LUI"].unique())} unique `LUI` values. Entries with different `LUI` show different terms for the same concepts. Meanwhile, entries with the same `LUI` but different `SUI` show different capitalization or spelling for the same term."),
+            mo.md("For example, here are the entries for the same concept `CUI` but with different `LUI`:"),
+            mo.ui.table(_different_lui_data),
+            mo.md(f"Now, consider `{top_lui}` which has {_top_lui_count}, we have the follwing entries:"),
+            mo.ui.table(_same_lui_data),
+            mo.md(f"They are all different spelling or capitalization of {_same_lui_data["STR"].iloc[0]}")
+        ]
+    )
+    _display
+    return (top_lui_data,)
+
+
+@app.cell
+def _(mo, top_lui_data):
+    top_sui = top_lui_data["SUI"].value_counts().idxmax()
+    _top_sui_count = top_lui_data["SUI"].value_counts().max()
+    top_sui_data  = top_lui_data[top_lui_data["SUI"] == top_sui][["SUI", "SAB", "TTY", "STR"]]
+
+
+    _display = mo.vstack(
+        [
+            mo.md(f"Lastly, consider `SUI`. With the same `SUI` value, we can view different source for the same `STR` value. For example, here are the entries {top_sui} with {_top_sui_count} entries:"),
+            mo.ui.table(top_sui_data)
+        ]
+    )
+    _display
+    return
+
 
 if __name__ == "__main__":
     app.run()

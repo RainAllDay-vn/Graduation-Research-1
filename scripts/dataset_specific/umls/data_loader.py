@@ -49,6 +49,29 @@ class UmlsDataLoader(DataLoader):
             usecols=range(len(headers))
         )
 
+    def load_file_as_generator(
+        self, 
+        folder_name: str, 
+        file_name: str, 
+        chunk_size: int = 100_000, 
+        usecols: Optional[list] = None
+    ):
+        headers = self.load_headers(file_name)
+        file_path = os.path.join(self.extracted_path, folder_name, file_name)
+        
+        # Determine columns to load
+        columns_to_load = usecols if usecols is not None else range(len(headers))
+        
+        return pd.read_csv(
+            file_path, 
+            sep='|',
+            names=headers,
+            index_col=False, 
+            low_memory=False, 
+            usecols=columns_to_load,
+            chunksize=chunk_size
+        )
+
     def load_headers(self, file_name: str):
         print(f"Loading metadata for {file_name}...")
         files_description_path = os.path.join(self.extracted_path, 'META', 'MRFILES.RRF')
