@@ -3,7 +3,7 @@ from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import importlib
 
-from scripts.models import Concept, Entity, Relation
+from scripts.models import Concept, Entity, Relation, DataLoader
 
 load_dotenv()
 
@@ -34,8 +34,8 @@ class KnowledgeGraph:
 
         module_path = f"scripts.dataset_specific.{dataset_name}.data_loader"
         try:
-            loader = importlib.import_module(module_path)
-            loader.load(self.driver, dataset_path)
+            loader: DataLoader = importlib.import_module(module_path).get_loader(self.driver, dataset_path)
+            loader.load()
         except ImportError as e:
             raise ValueError(f"No data loader found for dataset '{dataset_name}' (expected at {module_path}). Error: {e}")
         

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Union, Optional, Literal
-from neo4j import Record
+from abc import ABC, abstractmethod
+from neo4j import Record, Driver
 
 @dataclass
 class QualifierUnit:
@@ -36,3 +37,13 @@ class Entity:
     name: str
     attributes: List[Attribute]
     relationships: list[Relation]
+
+class DataLoader(ABC):
+    def __init__(self, driver: Driver, dataset_path: Optional[str] = None):
+        self.driver = driver
+        self.dataset_path = dataset_path
+
+    @abstractmethod
+    def load(self):
+        """Loads data into the Neo4j database."""
+        pass
