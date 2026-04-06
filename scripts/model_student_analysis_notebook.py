@@ -27,18 +27,15 @@ def _():
         Dict,
         GraphDatabase,
         List,
+        ModelEvaluator,
         SyntaxValidator,
         Tuple,
         ast,
         basic_auth,
         mo,
-        np,
-        os,
         pd,
         plt,
         re,
-        sqlite3,
-        ModelEvaluator,
     )
 
 
@@ -102,7 +99,6 @@ def _(ModelEvaluator, pd):
 
     df_reason['thinking_length'] = pd.to_numeric(df_reason['thinking_text'].str.len(), errors='coerce')
     df_reason['query_length'] = pd.to_numeric(df_reason['query_text'].str.len(), errors='coerce')
-
     return df_reason, invalid_response_count
 
 
@@ -343,15 +339,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    Any,
-    Dict,
-    GraphDatabase,
-    SyntaxValidator,
-    Tuple,
-    basic_auth,
-    df_reason,
-):
+def _(Any, Dict, GraphDatabase, SyntaxValidator, Tuple, basic_auth, df_reason):
     # Connect to Neo4j (required by CyVer)
     _uri: str = "bolt://localhost:7687"
     _auth: Tuple[str, str] = basic_auth("neo4j", "password-to-kg")
@@ -387,13 +375,7 @@ def _(
     valid_re: int = int(df_re_sample['is_valid'].sum())
     invalid_re: int = total_re - valid_re
     pct_invalid_re: float = (invalid_re / total_re * 100) if total_re > 0 else 0.0
-    return (
-        df_re_sample,
-        invalid_re,
-        pct_invalid_re,
-        total_re,
-        valid_re,
-    )
+    return df_re_sample, invalid_re, pct_invalid_re, total_re, valid_re
 
 
 @app.cell
@@ -430,7 +412,7 @@ def _(df_re_sample, mo):
 
 
 @app.cell
-def _(Any, Dict, List, ast, df_re_sample, pd, re):
+def _(Any, Dict, List, ast, df_re_sample, re):
     def _clean_error(error_str: str) -> str:
         """Parse stringified list of errors and aggressively group by core category."""
         if not error_str or error_str == "Empty or None query":
@@ -516,19 +498,20 @@ def _(err_ranking, mo, plt):
 
 
 @app.cell
-def _(invalid_re: int, np, plt, valid_re: int):
+def _(invalid_re: int, plt, valid_re: int):
     # Pie Chart: Valid vs Invalid (Reasoning ON)
     _labels = ['Valid', 'Invalid']
     _sizes = [valid_re, invalid_re]
     _colors = ['teal', 'crimson']
 
     _fig, _ax = plt.subplots(figsize=(8, 8))
-    _ax.pie(_sizes, labels=_labels, autopct='%1.1f%%', startangle=140, colors=_colors, alpha=0.8)
+    _ax.pie(_sizes, labels=_labels, autopct='%1.1f%%', startangle=140, colors=_colors)
     _ax.set_title('Cypher Query Syntax Validation (Reasoning ON)')
 
     plt.tight_layout()
     _fig
     return
+
 
 if __name__ == "__main__":
     app.run()
