@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.0"
+__generated_with = "0.22.4"
 app = marimo.App()
 
 
@@ -45,11 +45,6 @@ def _(mo):
     # Model Analysis: Reasoning Performance
 
     This notebook analyzes the performance of **Qwen/Qwen3.5-0.8B** on the **LC-QuAD 2.0** dataset when reasoning is enabled.
-
-    ### Key Objectives:
-    - Analyze the "thinking" process length for reasoning-enabled models.
-    - Validate Cypher query syntax for generated outputs.
-    - Visualize distributions and identify potential outliers or patterns.
     """)
     return
 
@@ -75,14 +70,14 @@ def _(ModelEvaluator, pd):
 
     def _extract_parts(text):
         if not text:
-            return "", ""
-        # The model response for reasoning models usually wraps thinking in <think>...</think>
-        # We look for the closing tag to separate thinking from the final query.
+            return None
         _clean_text = text.replace("<think>", "")
         before, sep, after = _clean_text.partition("</think>")
-        if sep:
-            return before.strip(), after.strip()
-        return None
+        before, after = before.strip(), after.strip()
+
+        if not before or not sep or not after:
+            return None
+        return before, after
 
     _parts = df_reason['full_content'].apply(_extract_parts)
     invalid_response_count = int(_parts.isna().sum())
@@ -94,8 +89,9 @@ def _(ModelEvaluator, pd):
 
     # Map valid parts back to the dataframe
     if not _valid_parts.empty:
-        df_reason.loc[_valid_parts.index, 'thinking_text'] = _valid_parts.apply(lambda x: x[0])
-        df_reason.loc[_valid_parts.index, 'query_text'] = _valid_parts.apply(lambda x: x[1])
+        df_reason = df_reason.loc[_valid_parts.index].copy()
+        df_reason['thinking_text'] = _valid_parts.apply(lambda x: x[0])
+        df_reason['query_text'] = _valid_parts.apply(lambda x: x[1])
 
     df_reason['thinking_length'] = pd.to_numeric(df_reason['thinking_text'].str.len(), errors='coerce')
     df_reason['query_length'] = pd.to_numeric(df_reason['query_text'].str.len(), errors='coerce')
@@ -300,35 +296,6 @@ def _(df_reason, plt):
 @app.cell
 def _(mo):
     mo.md("""
-    ## Short Query Investigation
-
-    There is a surprising number of Cypher queries with zero or very short length (<= 10 characters). This section investigates these cases to understand if the model stopped after reasoning or failed to generate the query block.
-    """)
-    return
-
-
-@app.cell
-def _(df_reason, mo):
-    # Filter for short queries (<= 10 chars)
-    _short_queries = df_reason[df_reason['query_length'] <= 10].copy()
-
-    # Sort by thinking length to see if longer reasoning leads to empty queries
-    _short_queries = _short_queries.sort_values(by='thinking_length', ascending=False)
-
-    _display_cols = ['question', 'query_text', 'thinking_text', 'thinking_length', 'query_length']
-    _table = mo.ui.table(_short_queries[_display_cols].head(20))
-
-    _content = mo.vstack([
-        mo.md(f"### Found {len(_short_queries)} queries with length <= 10"),
-        _table
-    ])
-    _content
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md("""
     ## Cypher Query Syntax Validation (CyVer AST)
 
     We validate all generated Cypher queries using **CyVer**'s `SyntaxValidator`, which uses the openCypher ANTLR grammar under the hood to perform real AST-based syntax validation.
@@ -360,8 +327,8 @@ def _(Any, Dict, GraphDatabase, SyntaxValidator, Tuple, basic_auth, df_reason):
         except Exception as e:
             return {"is_valid": False, "error": f"Exception: {str(e)}"}
 
-    # --- Process Reasoning ON Subset (up to 200) ---
-    _count_re: int = min(200, len(df_reason))
+    # --- Process Reasoning ON Subset (up to 100) ---
+    _count_re: int = min(100, len(df_reason))
     df_re_sample = df_reason.sample(n=_count_re, random_state=42).copy() if _count_re > 0 else df_reason.copy()
 
     _results_re = df_re_sample['query_text'].apply(_validate_query)
@@ -387,7 +354,7 @@ def _(
     valid_re: int,
 ):
     mo.md(f"""
-    ### Validation Results Summary (Subset Sample: n=200)
+    ### Validation Results Summary (Subset Sample: n=100)
 
     | Reasoning Mode | Total Sample | Valid Queries | Invalid Queries | % Invalid |
     | :--- | :--- | :--- | :--- | :--- |
