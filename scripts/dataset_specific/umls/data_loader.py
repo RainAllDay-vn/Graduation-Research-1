@@ -47,6 +47,13 @@ class UmlsDataLoader(DataLoader):
             columns = ['COL', 'DES', 'REF', 'MIN', 'AV', 'MAX', 'FIL', 'DTY']
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_mrdoc_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRDOC.RRF which contains metadata documentation (key-value maps)."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRDOC.RRF')
+        if columns is None:
+            columns = ['DOCKEY', 'VALUE', 'TYPE', 'EXPL']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()

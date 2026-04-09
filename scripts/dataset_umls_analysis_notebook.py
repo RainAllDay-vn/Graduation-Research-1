@@ -180,5 +180,85 @@ def _(mrcols_df):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 1.3 MRDOC.RRF (Metadata Documentation)
+
+    **MRDOC.RRF** is a key-value documentation map that explains codes, abbreviations, and attributes used throughout UMLS.
+
+    ### Content Structure:
+    - **DOCKEY**: The category of metadata (e.g., `ATN` for Attributes, `RELA` for Relationships).
+    - **VALUE**: The specific code or abbreviation (e.g., `isa`).
+    - **TYPE**: Category of explanation (usually `expanded_form`).
+    - **EXPL**: The full description or definition.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrdoc_df = data_loader.load_mrdoc_definitions()
+    return (mrdoc_df,)
+
+
+@app.cell
+def _(mo, mrdoc_df):
+    dockey_counts = mrdoc_df['DOCKEY'].value_counts()
+
+    mo.md(f"""
+    ### 📊 Dataset Overview
+    The documentation catalog contains **{len(dockey_counts)}** distinct categories. Below is the master view of the documentation map and the most frequent documentation types (**DOCKEY**):
+    """)
+    return (dockey_counts,)
+
+
+@app.cell
+def _(dockey_counts, mo, mrdoc_df):
+    # Side-by-side or sequential overview
+    mo.vstack([
+        mo.md("#### Sample Entries"),
+        mrdoc_df.head(5),
+        mo.md("#### Frequencies"),
+        dockey_counts.head(10)
+    ])
+    return
+
+
+@app.cell
+def _(mo, mrcols_df, mrdoc_df):
+    # Simplified lookup logic
+    def get_info(key):
+        desc = mrcols_df[mrcols_df['COL'] == key]['DES'].iloc[0] if key in mrcols_df['COL'].values else "Metadata Category"
+        data = mrdoc_df[mrdoc_df['DOCKEY'] == key]
+        return desc, data
+
+    atn_desc, atn_view = get_info('ATN')
+    rela_desc, rela_view = get_info('RELA')
+
+    mo.md(f"""
+    ## 🔍 Deep Dive: Common Metadata Keys
+    By linking **MRDOC** to **MRCOLS**, we can interpret high-volume documentation types:
+
+    | Key | Meaning (from MRCOLS) | Count | Purpose |
+    |-----|-------------------|-------|---------|
+    | **ATN** | *{atn_desc}* | {len(atn_view)} | Maps technical codes to readable attributes. |
+    | **RELA** | *{rela_desc}* | {len(rela_view):,} | Provides granular semantic context for relationships (e.g., `isa`, `part_of`). |
+    """)
+    return atn_view, rela_view
+
+
+@app.cell
+def _(atn_view, mo, rela_view):
+    mo.vstack([
+        mo.md("### 📂 Interpretation Previews"),
+        mo.md("**Attributes (ATN):**"),
+        atn_view.head(5),
+        mo.md("**Relationship Labels (RELA):**"),
+        rela_view.head(5)
+    ])
+    return
+
+
 if __name__ == "__main__":
     app.run()
