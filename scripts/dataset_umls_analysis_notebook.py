@@ -119,5 +119,66 @@ def _(mrfiles_df):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 1.2 MRCOLS.RRF (Column Definitions)
+
+    **MRCOLS.RRF** is the central data dictionary for the entire UMLS dataset. It defines every attribute (column) used across all files, providing descriptions, data types, and basic statistics.
+
+    ### Key Attributes:
+    - **COL**: Column name/Attribute name.
+    - **DES**: Human-readable description.
+    - **REF**: Reference to documentation.
+    - **MIN/AV/MAX**: Statistics about the field length or value.
+    - **FIL**: The file this column belongs to.
+    - **DTY**: Data type.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrcols_df = data_loader.load_column_definitions()
+    return (mrcols_df,)
+
+
+@app.cell
+def _(mrcols_df):
+    mrcols_df.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrcols_df):
+    # Let's find a descriptive column for demonstration
+    _mask = mrcols_df['COL'] == 'CUI'
+    sample_col = mrcols_df[_mask].iloc[0] if _mask.any() else mrcols_df.iloc[0]
+
+    mo.md(f"""
+    ### 🔍 Column Interpretation: `{sample_col['COL']}` in `{sample_col['FIL']}`
+    - **Description**: {sample_col['DES']}
+    - **Data Type**: `{sample_col['DTY']}`
+    - **Length Stats**: Min: {sample_col['MIN']}, Avg: {sample_col['AV']}, Max: {sample_col['MAX']}
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### 📂 Column Lookup by File
+    Use the table below to explore columns for a specific file (e.g., `MRCONSO.RRF`).
+    """)
+    return
+
+
+@app.cell
+def _(mrcols_df):
+    # Filter for MRCONSO.RRF as a common example
+    mrcols_df[mrcols_df['FIL'] == 'MRCONSO.RRF']
+    return
+
+
 if __name__ == "__main__":
     app.run()

@@ -40,6 +40,13 @@ class UmlsDataLoader(DataLoader):
             columns = ['FIL', 'DES', 'FMT', 'CLS', 'RTY', 'SZY']
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_column_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRCOLS.RRF which contains column-level metadata."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRCOLS.RRF')
+        if columns is None:
+            columns = ['COL', 'DES', 'REF', 'MIN', 'AV', 'MAX', 'FIL', 'DTY']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()
