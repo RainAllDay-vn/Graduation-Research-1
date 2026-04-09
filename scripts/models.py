@@ -23,7 +23,7 @@ class Attribute:
 @dataclass
 class Relation:
     name: str
-    target: Concept | Entity
+    target: "Concept | Entity"
     qualifiers: Dict[str, List[QualifierUnit]] = field(default_factory=dict)
 
 @dataclass
