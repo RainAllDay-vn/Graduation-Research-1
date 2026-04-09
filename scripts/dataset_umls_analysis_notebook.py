@@ -273,5 +273,63 @@ def _(mo):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ---
+    ## 1.3: Source Distribution Analysis
+
+    This section analyzes the distribution of different source vocabularies in the sample set. The `SAB` (Source Abbreviation) column identifies the origin of each term.
+    """)
+    return
+
+
+@app.cell
+def _(mo, pd, plt, sample):
+    _counts = sample["SAB"].value_counts().reset_index()
+    _counts.columns = ["Source", "Count"]
+
+    # Calculate percentage
+    _total = _counts["Count"].sum()
+    _counts["Percentage"] = (_counts["Count"] / _total) * 100
+
+    # Group sources with less than 2% to "Other"
+    _mask = _counts["Percentage"] < 2
+    _other_count = _counts[_mask]["Count"].sum()
+    _main_groups = _counts[~_mask].copy()
+
+    if _other_count > 0:
+        _other_row = pd.DataFrame({"Source": ["Other"], "Count": [_other_count], "Percentage": [(_other_count / _total) * 100]})
+        _main_groups = pd.concat([_main_groups, _other_row], ignore_index=True)
+
+    _fig, _ax = plt.subplots(figsize=(10, 10))
+    _ax.pie(_main_groups["Count"], labels=_main_groups["Source"], autopct='%1.1f%%', startangle=140, colors=plt.cm.tab20.colors)
+    _ax.set_title("Source Distribution (Minority Groups < 2% merged as 'Other')")
+
+    _display = mo.vstack(
+        [
+            mo.md("### Source Distribution Pie Chart"),
+            mo.as_html(_fig),
+            mo.md("### Detailed Source Counts"),
+            mo.ui.table(_main_groups[["Source", "Count", "Percentage"]]),
+        ]
+    )
+    plt.close(_fig)
+    _display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Observations:
+    *   **Dominant Sources**: **SNOMEDCT_US** (30.3%) and **MSH** (27.4%) together account for more than 57% of all entries in the sample, highlighting their central role in the UMLS Metathesaurus.
+    *   **Secondary Sources**: **CHV** (7.2%), **MSHGER** (5.1%), and **NCI** (4.5%) provide significant additional terminology.
+    *   **Diversity**: Smaller sources like **ICD9CM** (2.8%) and **LOINC/LNC** (2.0%) are also present, despite the 2% grouping threshold.
+    *   **Long Tail**: The "Other" category accounts for 15.0% of the sample, indicating a broad range of specialized vocabularies that each contribute less than 2% individually.
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()
