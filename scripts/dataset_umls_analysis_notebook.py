@@ -260,5 +260,85 @@ def _(atn_view, mo, rela_view):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 1.4 MRSAB.RRF (Source Vocabulary Registry)
+
+    **MRSAB.RRF** contains detailed metadata about the external vocabularies (e.g., SNOMED CT, MeSH, ICD-10) that contribute concepts to the UMLS. It is the "Source Registry" that defines the provenance and versioning of the data.
+
+    ### Content Highlights:
+    - **SAB/VSAB/RSAB**: Source abbreviations (e.g., `MSH`, `SNOMEDCT_US`).
+    - **SON/SF**: Official names and source families.
+    - **SVER/VSTART/VEND**: Versioning and validity dates.
+    - **LAT/CENC**: Language and character encoding.
+    - **CFR/TFR**: Statistics (CUI and Term frequencies).
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrsab_df = data_loader.load_source_vocabularies()
+    return (mrsab_df,)
+
+
+@app.cell
+def _(mrsab_df):
+    mrsab_df.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrsab_df):
+    lang_counts = mrsab_df['LAT'].value_counts()
+
+    mo.md(f"""
+    ### 🌍 Global Reach
+    The current release includes contents in **{len(lang_counts)}** languages.
+
+    #### Sources by Language (Top 10)
+    """)
+    return (lang_counts,)
+
+
+@app.cell
+def _(lang_counts):
+    lang_counts.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrsab_df):
+    # Example: Look for a major source
+    major_source = mrsab_df[mrsab_df['RSAB'] == 'MSH'].iloc[0] if 'MSH' in mrsab_df['RSAB'].values else mrsab_df.iloc[0]
+
+    mo.md(f"""
+    ### 🔍 Source Detailed Preview: `{major_source['RSAB']}`
+    - **Official Name**: {major_source['SON']}
+    - **Family**: {major_source['SF'] or 'N/A'}
+    - **Version**: `{major_source['SVER']}`
+    - **Language**: {major_source['LAT']}
+    - **Scale**: Contains **{int(major_source['CFR']):,}** concepts (CUIs).
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Section 1 Summary: The Metadata Lookup Strategy
+
+    To navigate the UMLS metadata efficiently, use this hierarchy when you encounter an unfamiliar term:
+
+    | If you encounter a... | Look in... | Why? |
+    | :--- | :--- | :--- |
+    | **Column Header** (e.g., `TTY`, `SAB`, `CUI`) | [MRCOLS.RRF](#1.2-MRCOLS.RRF-Column-Definitions) | Defines the **Data Structure** and field meanings. |
+    | **Code/Abbreviation** (e.g., `PT`, `isa`, `expanded_form`) | [MRDOC.RRF](#1.3-MRDOC.RRF-Metadata-Documentation) | Defines the **Internal Vocabulary** (key-value documentation). |
+    | **Source Label** (e.g., `MSH`, `SNOMEDCT_US`) | [MRSAB.RRF](#1.4-MRSAB.RRF-Source-Vocabulary-Registry) | Defines the **Data Providers** (the "Who and When"). |
+    """)
+    return
+
+
 if __name__ == "__main__":
     app.run()

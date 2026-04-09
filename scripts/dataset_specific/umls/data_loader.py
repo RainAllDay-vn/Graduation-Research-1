@@ -54,6 +54,17 @@ class UmlsDataLoader(DataLoader):
             columns = ['DOCKEY', 'VALUE', 'TYPE', 'EXPL']
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_source_vocabularies(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRSAB.RRF which contains source-level metadata (registry)."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRSAB.RRF')
+        if columns is None:
+            columns = [
+                'VCUI', 'RCUI', 'VSAB', 'RSAB', 'SON', 'SF', 'SVER', 'VSTART', 
+                'VEND', 'IMETA', 'RMETA', 'SLC', 'SCC', 'SRL', 'TFR', 'CFR', 
+                'CXTY', 'TTYL', 'ATNL', 'LAT', 'CENC', 'CURVER', 'SABIN', 'SSN', 'SCIT'
+            ]
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()
