@@ -340,5 +340,193 @@ def _(mo):
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Section 2: NET Directory (Semantic Network Metadata)
+
+    In this section, we transition from the **Metathesaurus** (which contains concepts and their relationships) to the **Semantic Network**.
+
+    The Semantic Network is the "Skeleton" or "Ontology" of UMLS. It provides a small, stable set of categories and relationships that provide a high-level abstraction of the medical domain.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2.1 SRDEF (Semantic Types & Relations Definitions)
+
+    **SRDEF** serves as the primary registry for the Semantic Network. It defines the names, hierarchy, and properties of all **Semantic Types** (categories) and **Semantic Relations**.
+
+    ### 2.1.1 Semantic Types
+    These are the high-level categories used to group concepts in the Metathesaurus.
+
+    ### Key Column Definitions:
+    - **RT**: Record Type (`STY` for Semantic Type, `RL` for Relation).
+    - **UI**: Unique Identifier (`T###` for types, `R###` for relations).
+    - **NAME**: The official label (e.g., "Disease or Syndrome").
+    - **TREE**: Hierarchy path (e.g., `A1.1.3` shows how types are nested).
+    - **RIN**: The identifier of the Inverse Relation (only for `RL` records).
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    srdef_df = data_loader.load_semantic_network_definitions()
+    return (srdef_df,)
+
+
+@app.cell
+def _(srdef_df):
+    # Split for easier analysis
+    semantic_types_df = srdef_df[srdef_df['RT'] == 'STY'].copy()
+    semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL'].copy()
+    return semantic_relations_df, semantic_types_df
+
+
+@app.cell
+def _(mo, semantic_relations_df, semantic_types_df):
+    mo.md(f"""
+    ### 📊 Inventory Summary
+    - **Total Semantic Types (`STY`)**: {len(semantic_types_df)}
+    - **Total Semantic Relations (`RL`)**: {len(semantic_relations_df)}
+
+    #### Top 5 Semantic Types (Alphabetical)
+    """)
+    return
+
+
+@app.cell
+def _(semantic_types_df):
+    semantic_types_df[['UI', 'NAME', 'TREE', 'DEF']].sort_values(by='NAME').head(5)
+    return
+
+
+@app.cell
+def _(mo, semantic_types_df):
+    # Analyze the hierarchy depth
+    semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\.') + 1
+    depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
+
+    mo.md(f"""
+    ### 🌳 Hierarchy Analysis
+    The semantic network has a maximum depth of **{semantic_types_df['DEPTH'].max()}** levels.
+
+    #### Distribution of Semantic Types by Depth:
+    """)
+    return (depth_stats,)
+
+
+@app.cell
+def _(depth_stats):
+    depth_stats
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### 📖 Guide: Reading the Hierarchy Path (`TREE`)
+    The `TREE` field (also known as the Semantic Type Number or STN) uses a nested "breadcrumb" system. Each dot-separated segment represents a level of increasing specificity.
+
+    **Example: `B2.2.1.2.1` (Disease or Syndrome)**
+
+    | Level | Code | Name | Category Type |
+    |:---|:---|:---|:---|
+    | 1 | **B** | **Event** | Root Branch (Physical vs. Conceptual) |
+    | 2 | **B2** | Phenomenon or Process | High-level Class |
+    | 3 | **B2.2** | Natural Phenomenon or Process | Domain |
+    | 4 | **B2.2.1** | Biologic Function | Context |
+    | 5 | **B2.2.1.2**| Pathologic Function | Abnormal State (The Turning Point) |
+    | 6 | **B2.2.1.2.1**| **Disease or Syndrome**| **Final Classification** |
+
+    Tracing the path from left to right tells you the absolute lineage of any category in the UMLS ontology.
+    """)
+    return
+
+
+@app.cell
+def _(mo, semantic_types_df):
+    # Deep dive into a common type: "Disease or Syndrome" (T047)
+    _mask = semantic_types_df['UI'] == 'T047'
+    sample_type = semantic_types_df[_mask].iloc[0] if _mask.any() else semantic_types_df.iloc[0]
+
+    mo.md(f"""
+    ### 🔍 Semantic Type Deep Dive: `{sample_type['NAME']}` ({sample_type['UI']})
+    - **Hierarchy Path (`TREE`)**: `{sample_type['TREE']}`
+    - **Definition**: *{sample_type['DEF']}*
+    - **Examples**: {sample_type['EX'] or "None listed."}
+    - **Abbreviation**: `{sample_type['AB']}`
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2.1.2 Semantic Relations
+
+    While Semantic Types categorize concepts, **Semantic Relations** define the potential linkages between those categories. For example, a "Biologic Function" might *affect* a "Disease or Syndrome".
+
+    ### Key Features:
+    - **Inverses**: Most relations have a counter-part (e.g., `part_of` vs. `has_part`).
+    - **Symmetry**: Some relations are their own inverse (e.g., `temporally_related_to`).
+    """)
+    return
+
+
+@app.cell
+def _(mo, semantic_relations_df):
+    # Analyze inverses
+    relation_summary = semantic_relations_df[['UI', 'NAME', 'RIN', 'TREE', 'DEF']].sort_values(by='NAME')
+
+    mo.md(f"""
+    ### 🔗 Relation Registry & Inverse Mapping
+    Below is the complete list of defined relations and their respective inverses:
+    """)
+    return (relation_summary,)
+
+
+@app.cell
+def _(relation_summary):
+    relation_summary
+    return
+
+
+@app.cell
+def _(mo, semantic_relations_df):
+    # Identify symmetric vs asymmetric relations
+    symmetric = semantic_relations_df[semantic_relations_df['NAME'] == semantic_relations_df['RIN']]
+    asymmetric = semantic_relations_df[semantic_relations_df['NAME'] != semantic_relations_df['RIN']]
+
+    mo.md(f"""
+    ### ⚖️ Symmetry Analysis
+    - **Symmetric Relations**: {len(symmetric)} (e.g., `{symmetric['NAME'].iloc[0] if not symmetric.empty else 'N/A'}`)
+    - **Asymmetric Relations**: {len(asymmetric)} (e.g., `{asymmetric['NAME'].iloc[0] if not asymmetric.empty else 'N/A'}` → `{asymmetric['RIN'].iloc[0] if not asymmetric.empty else 'N/A'}`)
+    """)
+    return
+
+
+@app.cell
+def _(mo, relation_summary):
+    # Identify top-level relations (depth 1)
+    relation_summary['DEPTH'] = relation_summary['TREE'].str.count('\.') + 1
+    top_relations = relation_summary[relation_summary['DEPTH'] == 1]
+
+    mo.md(f"""
+    ### 🏘️ Relation Hierarchy (Root Branches)
+    Just like Semantic Types, relations are organized into a hierarchy. There are **{len(top_relations)}** major branches of relationships:
+    """)
+    return (top_relations,)
+
+
+@app.cell
+def _(top_relations):
+    top_relations[['UI', 'NAME', 'TREE', 'DEF']]
+    return
+
+
 if __name__ == "__main__":
     app.run()

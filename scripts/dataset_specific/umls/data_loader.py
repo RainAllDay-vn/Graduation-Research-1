@@ -65,6 +65,13 @@ class UmlsDataLoader(DataLoader):
             ]
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_semantic_network_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads SRDEF which contains the definitions of Semantic Types and Relations (NET directory)."""
+        file_path = os.path.join(self.extracted_path, 'NET', 'SRDEF')
+        if columns is None:
+            columns = ['RT', 'UI', 'NAME', 'TREE', 'DEF', 'EX', 'UN', 'NH', 'AB', 'RIN']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()
