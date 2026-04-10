@@ -65,6 +65,20 @@ class UmlsDataLoader(DataLoader):
             ]
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_ranking_metadata(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRRANK.RRF which contains preferred term ranking within sources."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRRANK.RRF')
+        if columns is None:
+            columns = ['RANK', 'SAB', 'TTY', 'SUPPRESS']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
+    def load_semantic_network_files(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads SRFIL which identifies all files in the Semantic Network (NET directory)."""
+        file_path = os.path.join(self.extracted_path, 'NET', 'SRFIL')
+        if columns is None:
+            columns = ['FIL', 'DES', 'FMT', 'CLS', 'RWS', 'BTS']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load_semantic_network_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads SRDEF which contains the definitions of Semantic Types and Relations (NET directory)."""
         file_path = os.path.join(self.extracted_path, 'NET', 'SRDEF')

@@ -327,6 +327,65 @@ def _(mo, mrsab_df):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## 1.5 MRRANK.RRF (Concept Name Ranking)
+
+    **MRRANK.RRF** contains metadata about how concept names (terms) are ranked within each source vocabulary. This ranking determines which term is considered the "Preferred Name" (PN) for a concept.
+
+    ### Key Column Definitions:
+    - **RANK**: Absolute numerical rank (higher is better).
+    - **SAB**: Source abbreviation (e.g., `MTH`, `SNOMEDCT_US`).
+    - **TTY**: Term Type (e.g., `PN` for Preferred Name, `SY` for Synonym).
+    - **SUPPRESS**: Whether this term type is suppressed by default (`N`, `O`, `Y`).
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrrank_df = data_loader.load_ranking_metadata()
+    return (mrrank_df,)
+
+
+@app.cell
+def _(mrrank_df):
+    mrrank_df.sort_values(by='RANK', ascending=False).head(10)
+    return
+
+
+@app.cell
+def _(mo, mrrank_df):
+    # Example for MTH (Metathesaurus source)
+    mth_ranking = mrrank_df[mrrank_df['SAB'] == 'MTH'].sort_values(by='RANK', ascending=False)
+
+    mo.md(f"""
+    ### 🔍 Ranking Insight: `MTH` (Metathesaurus)
+    In the `MTH` source, the top-ranked term types are shown below. A rank of **{mth_ranking['RANK'].max() if not mth_ranking.empty else 'N/A'}** is assigned to the most preferred term type (**{mth_ranking['TTY'].iloc[0] if not mth_ranking.empty else 'N/A'}**).
+    """)
+    return (mth_ranking,)
+
+
+@app.cell
+def _(mth_ranking):
+    mth_ranking.head(5)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### 💡 What we can infer from this table:
+
+    1.  **Top Priority**: The term type **PN** (Preferred Name) has the highest rank (**396**), meaning it is the first choice for a concept's name in `MTH`.
+    2.  **Ranking Logic**: UMLS uses a numerical system where a **higher rank** indicates a higher preference.
+    3.  **Active Status**: All top-ranked terms have `SUPPRESS = 'N'`, which means they are not suppressed and are active for use.
+    4.  **Source Specificity**: These specific rankings only apply to the **MTH** source; other sources (like SNOMED CT) have their own ranking order.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     # Section 1 Summary: The Metadata Lookup Strategy
 
     To navigate the UMLS metadata efficiently, use this hierarchy when you encounter an unfamiliar term:
@@ -336,6 +395,7 @@ def _(mo):
     | **Column Header** (e.g., `TTY`, `SAB`, `CUI`) | [MRCOLS.RRF](#1.2-MRCOLS.RRF-Column-Definitions) | Defines the **Data Structure** and field meanings. |
     | **Code/Abbreviation** (e.g., `PT`, `isa`, `expanded_form`) | [MRDOC.RRF](#1.3-MRDOC.RRF-Metadata-Documentation) | Defines the **Internal Vocabulary** (key-value documentation). |
     | **Source Label** (e.g., `MSH`, `SNOMEDCT_US`) | [MRSAB.RRF](#1.4-MRSAB.RRF-Source-Vocabulary-Registry) | Defines the **Data Providers** (the "Who and When"). |
+    | **Term Ranking** (e.g., `PN`, `SCD`, `0396`) | [MRRANK.RRF](#1.5-MRRANK.RRF-Concept-Name-Ranking) | Defines the **Preferred Term Ranking** within sources. |
     """)
     return
 
@@ -355,11 +415,39 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 2.1 SRDEF (Semantic Types & Relations Definitions)
+    ## 2.1 SRFIL (NET Directory Roadmap)
+
+    **SRFIL** is the master catalog for the Semantic Network files. It provides a roadmap of the files included in the `NET` directory, their descriptions, and their physical attributes.
+
+    ### Key Metrics:
+    - **FIL**: File name.
+    - **DES**: Brief description.
+    - **FMT**: Column list (comma-separated).
+    - **RWS**: Number of rows.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    srfil_df = data_loader.load_semantic_network_files()
+    return (srfil_df,)
+
+
+@app.cell
+def _(srfil_df):
+    srfil_df
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2.2 SRDEF (Semantic Types & Relations Definitions)
 
     **SRDEF** serves as the primary registry for the Semantic Network. It defines the names, hierarchy, and properties of all **Semantic Types** (categories) and **Semantic Relations**.
 
-    ### 2.1.1 Semantic Types
+    ### 2.2.1 Semantic Types
     These are the high-level categories used to group concepts in the Metathesaurus.
 
     ### Key Column Definitions:
@@ -407,7 +495,7 @@ def _(semantic_types_df):
 @app.cell
 def _(mo, semantic_types_df):
     # Analyze the hierarchy depth
-    semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\.') + 1
+    semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\\.') + 1
     depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
 
     mo.md(f"""
@@ -466,7 +554,7 @@ def _(mo, semantic_types_df):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 2.1.2 Semantic Relations
+    ### 2.2.2 Semantic Relations
 
     While Semantic Types categorize concepts, **Semantic Relations** define the potential linkages between those categories. For example, a "Biologic Function" might *affect* a "Disease or Syndrome".
 
@@ -512,7 +600,7 @@ def _(mo, semantic_relations_df):
 @app.cell
 def _(mo, relation_summary):
     # Identify top-level relations (depth 1)
-    relation_summary['DEPTH'] = relation_summary['TREE'].str.count('\.') + 1
+    relation_summary['DEPTH'] = relation_summary['TREE'].str.count('\\.') + 1
     top_relations = relation_summary[relation_summary['DEPTH'] == 1]
 
     mo.md(f"""
