@@ -79,6 +79,14 @@ class UmlsDataLoader(DataLoader):
             columns = ['FIL', 'DES', 'FMT', 'CLS', 'RWS', 'BTS']
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_semantic_network_fields(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads SRFLD which contains field descriptions for the Semantic Network (NET directory)."""
+        file_path = os.path.join(self.extracted_path, 'NET', 'SRFLD')
+        if columns is None:
+            columns = ['COL', 'DES', 'REF', 'FIL']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
+
     def load_semantic_network_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads SRDEF which contains the definitions of Semantic Types and Relations (NET directory)."""
         file_path = os.path.join(self.extracted_path, 'NET', 'SRDEF')

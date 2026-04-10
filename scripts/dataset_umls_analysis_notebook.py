@@ -443,11 +443,44 @@ def _(srfil_df):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 2.2 SRDEF (Semantic Types & Relations Definitions)
+    ## 2.2 SRFLD (Field descriptions for NET directory)
+
+    **SRFLD** is the data dictionary for the Semantic Network. It defines every attribute (field) used across all files in the `NET` directory, providing descriptions and cross-references.
+
+    ### Key Attributes:
+    - **COL**: Column/Field name.
+    - **DES**: Human-readable description.
+    - **REF**: Reference to documentation.
+    - **FIL**: The file(s) where this field appears.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    srfld_df = data_loader.load_semantic_network_fields()
+    srfld_df.head(10)
+    return (srfld_df,)
+
+
+@app.cell
+def _(mo, srfld_df):
+    mo.md(f"""
+    ### 📊 Semantic Network Metadata Summary
+    - **Unique Fields**: {srfld_df['COL'].nunique()}
+    - **Files Covered**: {srfld_df['FIL'].nunique()}
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2.3 SRDEF (Semantic Types & Relations Definitions)
 
     **SRDEF** serves as the primary registry for the Semantic Network. It defines the names, hierarchy, and properties of all **Semantic Types** (categories) and **Semantic Relations**.
 
-    ### 2.2.1 Semantic Types
+    ### 2.3.1 Semantic Types
     These are the high-level categories used to group concepts in the Metathesaurus.
 
     ### Key Column Definitions:
@@ -554,7 +587,7 @@ def _(mo, semantic_types_df):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ### 2.2.2 Semantic Relations
+    ### 2.3.2 Semantic Relations
 
     While Semantic Types categorize concepts, **Semantic Relations** define the potential linkages between those categories. For example, a "Biologic Function" might *affect* a "Disease or Syndrome".
 
@@ -613,6 +646,23 @@ def _(mo, relation_summary):
 @app.cell
 def _(top_relations):
     top_relations[['UI', 'NAME', 'TREE', 'DEF']]
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Section 2 Summary: Navigating the Semantic Network
+
+    The Semantic Network files provide the ontological framework for the Metathesaurus. Use this strategy to explore it:
+
+    | If you want to... | Look in... | Description |
+    | :--- | :--- | :--- |
+    | **Identify a file** in the NET directory | [SRFIL](#2.1-SRFIL-NET-Directory-Roadmap) | The master catalog for Semantic Network files. |
+    | **Understand a column/field** | [SRFLD](#2.2-SRFLD-Field-descriptions-for-NET-directory) | The data dictionary for Semantic Network attributes. |
+    | **Lookup a Semantic Type** | [SRDEF](#2.3-SRDEF-Semantic-Types-&-Relations-Definitions) | Defines STY records, their hierarchy (`TREE`), and definitions. |
+    | **Lookup a Semantic Relation** | [SRDEF](#2.3-SRDEF-Semantic-Types-&-Relations-Definitions) | Defines RL records and their inverse relationships. |
+    """)
     return
 
 
