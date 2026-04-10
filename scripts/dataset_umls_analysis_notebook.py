@@ -84,16 +84,16 @@ def _(mrfiles_df):
 @app.cell
 def _(mo, mrfiles_df):
     _mask = mrfiles_df['FIL'] == 'AMBIGLUI.RRF'
-    sample_row = mrfiles_df[_mask].iloc[0] if _mask.any() else mrfiles_df.iloc[0]
+    _sample_row = mrfiles_df[_mask].iloc[0] if _mask.any() else mrfiles_df.iloc[0]
 
     mo.md(f"""
-    ### 🔍 Row Interpretation: `{sample_row['FIL']}`
+    ### 🔍 Row Interpretation: `{_sample_row['FIL']}`
     Let's break down the entry for the Ambiguous LUI identifiers file:
 
-    - **File Name (`FIL`)**: `{sample_row['FIL']}` (The physical file on disk)
-    - **Description (`DES`)**: *{sample_row['DES']}*
-    - **Columns (`FMT`)**: `{sample_row['FMT']}` (It contains {sample_row['CLS']} columns: {sample_row['FMT']})
-    - **Scale**: It contains **{int(sample_row['RTY']):,}** rows and occupies **{int(sample_row['SZY']):,}** bytes.
+    - **File Name (`FIL`)**: `{_sample_row['FIL']}` (The physical file on disk)
+    - **Description (`DES`)**: *{_sample_row['DES']}*
+    - **Columns (`FMT`)**: `{_sample_row['FMT']}` (It contains {_sample_row['CLS']} columns: {_sample_row['FMT']})
+    - **Scale**: It contains **{int(_sample_row['RTY']):,}** rows and occupies **{int(_sample_row['SZY']):,}** bytes.
     """)
     return
 
@@ -153,13 +153,13 @@ def _(mrcols_df):
 def _(mo, mrcols_df):
     # Let's find a descriptive column for demonstration
     _mask = mrcols_df['COL'] == 'CUI'
-    sample_col = mrcols_df[_mask].iloc[0] if _mask.any() else mrcols_df.iloc[0]
+    _sample_col = mrcols_df[_mask].iloc[0] if _mask.any() else mrcols_df.iloc[0]
 
     mo.md(f"""
-    ### 🔍 Column Interpretation: `{sample_col['COL']}` in `{sample_col['FIL']}`
-    - **Description**: {sample_col['DES']}
-    - **Data Type**: `{sample_col['DTY']}`
-    - **Length Stats**: Min: {sample_col['MIN']}, Avg: {sample_col['AV']}, Max: {sample_col['MAX']}
+    ### 🔍 Column Interpretation: `{_sample_col['COL']}` in `{_sample_col['FIL']}`
+    - **Description**: {_sample_col['DES']}
+    - **Data Type**: `{_sample_col['DTY']}`
+    - **Length Stats**: Min: {_sample_col['MIN']}, Avg: {_sample_col['AV']}, Max: {_sample_col['MAX']}
     """)
     return
 
@@ -311,15 +311,15 @@ def _(lang_counts):
 @app.cell
 def _(mo, mrsab_df):
     # Example: Look for a major source
-    major_source = mrsab_df[mrsab_df['RSAB'] == 'MSH'].iloc[0] if 'MSH' in mrsab_df['RSAB'].values else mrsab_df.iloc[0]
+    _major_source = mrsab_df[mrsab_df['RSAB'] == 'MSH'].iloc[0] if 'MSH' in mrsab_df['RSAB'].values else mrsab_df.iloc[0]
 
     mo.md(f"""
-    ### 🔍 Source Detailed Preview: `{major_source['RSAB']}`
-    - **Official Name**: {major_source['SON']}
-    - **Family**: {major_source['SF'] or 'N/A'}
-    - **Version**: `{major_source['SVER']}`
-    - **Language**: {major_source['LAT']}
-    - **Scale**: Contains **{int(major_source['CFR']):,}** concepts (CUIs).
+    ### 🔍 Source Detailed Preview: `{_major_source['RSAB']}`
+    - **Official Name**: {_major_source['SON']}
+    - **Family**: {_major_source['SF'] or 'N/A'}
+    - **Version**: `{_major_source['SVER']}`
+    - **Language**: {_major_source['LAT']}
+    - **Scale**: Contains **{int(_major_source['CFR']):,}** concepts (CUIs).
     """)
     return
 
@@ -572,14 +572,14 @@ def _(mo):
 def _(mo, semantic_types_df):
     # Deep dive into a common type: "Disease or Syndrome" (T047)
     _mask = semantic_types_df['UI'] == 'T047'
-    sample_type = semantic_types_df[_mask].iloc[0] if _mask.any() else semantic_types_df.iloc[0]
+    _sample_type = semantic_types_df[_mask].iloc[0] if _mask.any() else semantic_types_df.iloc[0]
 
     mo.md(f"""
-    ### 🔍 Semantic Type Deep Dive: `{sample_type['NAME']}` ({sample_type['UI']})
-    - **Hierarchy Path (`TREE`)**: `{sample_type['TREE']}`
-    - **Definition**: *{sample_type['DEF']}*
-    - **Examples**: {sample_type['EX'] or "None listed."}
-    - **Abbreviation**: `{sample_type['AB']}`
+    ### 🔍 Semantic Type Deep Dive: `{_sample_type['NAME']}` ({_sample_type['UI']})
+    - **Hierarchy Path (`TREE`)**: `{_sample_type['TREE']}`
+    - **Definition**: *{_sample_type['DEF']}*
+    - **Examples**: {_sample_type['EX'] or "None listed."}
+    - **Abbreviation**: `{_sample_type['AB']}`
     """)
     return
 
@@ -662,6 +662,133 @@ def _(mo):
     | **Understand a column/field** | [SRFLD](#2.2-SRFLD-Field-descriptions-for-NET-directory) | The data dictionary for Semantic Network attributes. |
     | **Lookup a Semantic Type** | [SRDEF](#2.3-SRDEF-Semantic-Types-&-Relations-Definitions) | Defines STY records, their hierarchy (`TREE`), and definitions. |
     | **Lookup a Semantic Relation** | [SRDEF](#2.3-SRDEF-Semantic-Types-&-Relations-Definitions) | Defines RL records and their inverse relationships. |
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Section 3: Core Data Files
+
+    In this section, we move into the **Core Data Files** of the Metathesaurus. These files contain the actual medical concepts, their names, relationships, and definitions.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 3.1 MRDEF.RRF (Definitions)
+
+    **MRDEF.RRF** contains semantic definitions for the concepts in the Metathesaurus. While not every concept has a definition, this file is crucial for adding context and meaning beyond simple term labels.
+
+    ### Why Start Here?
+    - **Scale**: At ~317,000 rows, it is relatively small compared to `MRCONSO` (~15M+ rows in recent releases).
+    - **Purpose**: It provides the "What does this mean?" layer.
+    - **Analogy**: After learning the names of concepts in `MRCONSO`, we use `MRDEF` to understand their actual definitions.
+
+    ### Key Column Definitions:
+    - **CUI**: Concept Unique Identifier.
+    - **AUI**: Atom Unique Identifier (linking to a specific term in `MRCONSO`).
+    - **SAB**: Source abbreviation (which vocabulary provided the definition).
+    - **DEF**: The actual definition text.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrdef_df = data_loader.load_concept_definitions()
+    return (mrdef_df,)
+
+
+@app.cell
+def _(mo, mrdef_df):
+    total_definitions = len(mrdef_df)
+    unique_cuis_with_def = mrdef_df['CUI'].nunique()
+
+    mo.md(f"""
+    ### 📊 Definitions Overview
+    - **Total Definitions**: {total_definitions:,}
+    - **Unique Concepts (CUIs) with Definitions**: {unique_cuis_with_def:,}
+
+    #### Sample Definitions:
+    """)
+    return
+
+
+@app.cell
+def _(mrdef_df):
+    mrdef_df.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrdef_df, mrsab_df):
+    _counts = mrdef_df['SAB'].value_counts().reset_index()
+    _counts.columns = ['RSAB', 'Definition Count']
+
+    # Join with MRSAB to get full names and languages
+    source_distribution = _counts.merge(
+        mrsab_df[['RSAB', 'SON', 'LAT']].drop_duplicates('RSAB'),
+        on='RSAB',
+        how='left'
+    )
+
+    mo.md(f"""
+    ### 📂 Source Distribution
+    UMLS aggregates definitions from many sources. Below are the top 10 contributors of definitions, joined with their official metadata from `MRSAB.RRF`:
+    """)
+    return (source_distribution,)
+
+
+@app.cell
+def _(source_distribution):
+    source_distribution.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrdef_df):
+    # Let's pick a specific concept with a definition
+    _sample_mask = mrdef_df['CUI'] == 'C0003123'
+    _cui_definitions = mrdef_df[_sample_mask] if _sample_mask.any() else mrdef_df.head(1)
+    sample_cui = _cui_definitions['CUI'].iloc[0]
+
+    mo.md(f"""
+    ### 🔍 Concept Deep Dive: `{sample_cui}`
+    Let's look at the definitions available for a specific concept:
+    """)
+    return (sample_cui,)
+
+
+@app.cell
+def _(mrdef_df, sample_cui):
+    # Show definitions for the same concept found above
+    mrdef_df[mrdef_df['CUI'] == sample_cui]
+    return
+
+
+@app.cell
+def _(mo, mrdef_df, sample_cui):
+    _sample_row = mrdef_df[mrdef_df['CUI'] == sample_cui].iloc[0]
+
+    mo.md(f"""
+    ### 💡 Interpreting the Definition Record
+
+    Using the record for `{sample_cui}` as an example:
+
+    | Field | Value (from sample) | Meaning |
+    | :--- | :--- | :--- |
+    | **CUI** | `{_sample_row['CUI']}` | **Concept Unique Identifier**. The "Master ID" for this medical idea. |
+    | **AUI** | `{_sample_row['AUI']}` | **Atom Unique Identifier**. Definitions are often tied to a specific term (atom) from the source. |
+    | **SAB** | `{_sample_row['SAB']}` | **Source Abbreviation**. Tells us which vocabulary (e.g., `{_sample_row['SAB']}`) provided the definition. |
+    | **DEF** | *"{_sample_row['DEF'][:150]}..."* | **The actual text**. This provides the semantic meaning for the concept. |
+    | **SUPPRESS** | `{_sample_row['SUPPRESS']}` | **Suppress status**. `{_sample_row['SUPPRESS']}` means this is an active, non-suppressed definition. |
+
+    **The Analogy:**
+    If `MRCONSO` (which we'll explore next) is the dictionary index—telling you all the names for a concept—then `MRDEF` is the **dictionary entry itself**, providing the formal medical explanation of what it actually is.
     """)
     return
 

@@ -94,6 +94,23 @@ class UmlsDataLoader(DataLoader):
             columns = ['RT', 'UI', 'NAME', 'TREE', 'DEF', 'EX', 'UN', 'NH', 'AB', 'RIN']
         return self._read_rrf(file_path, columns, limit=limit, offset=offset)
 
+    def load_concepts(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRCONSO.RRF which contains every concept name (atom) in the Metathesaurus."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRCONSO.RRF')
+        if columns is None:
+            columns = [
+                'CUI', 'LAT', 'TS', 'LUI', 'STT', 'SUI', 'ISPREF', 'AUI', 'SAUI', 
+                'SCUI', 'SDUI', 'SAB', 'TTY', 'CODE', 'STR', 'SRL', 'SUPPRESS', 'CVF'
+            ]
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
+    def load_concept_definitions(self, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRDEF.RRF which contains semantic definitions for concepts."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRDEF.RRF')
+        if columns is None:
+            columns = ['CUI', 'AUI', 'ATUI', 'SATUI', 'SAB', 'DEF', 'SUPPRESS', 'CVF']
+        return self._read_rrf(file_path, columns, limit=limit, offset=offset)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()
