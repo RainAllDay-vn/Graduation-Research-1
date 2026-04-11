@@ -34,9 +34,12 @@ def _(mo):
 @app.cell
 def _(KnowledgeGraph, UmlsDataLoader, os):
     # Base configuration
-    DATASET_ROOT = os.path.join("dataset", "umls")
-    _kg = KnowledgeGraph()
-    data_loader = UmlsDataLoader(_kg.driver, dataset_path=DATASET_ROOT)
+    def _get_data_loader():
+        DATASET_ROOT = os.path.join("dataset", "umls")
+        kg = KnowledgeGraph()
+        return UmlsDataLoader(kg.driver, dataset_path=DATASET_ROOT)
+
+    data_loader = _get_data_loader()
     return (data_loader,)
 
 
@@ -72,50 +75,57 @@ def _(mo):
 @app.cell
 def _(data_loader):
     mrfiles_df = data_loader.load_file_definitions()
+    mrfiles_df.head(10)
     return (mrfiles_df,)
 
 
 @app.cell
-def _(mrfiles_df):
-    mrfiles_df.head(10)
+def _(mo, mrfiles_df):
+    def _get_row_interpretation():
+        mask = mrfiles_df['FIL'] == 'AMBIGLUI.RRF'
+        sample_row = mrfiles_df[mask].iloc[0] if mask.any() else mrfiles_df.iloc[0]
+
+        return mo.md(f"""
+        ### 🔍 Row Interpretation: `{sample_row['FIL']}`
+        Let's break down the entry for the Ambiguous LUI identifiers file:
+
+        - **File Name (`FIL`)**: `{sample_row['FIL']}` (The physical file on disk)
+        - **Description (`DES`)**: *{sample_row['DES']}*
+        - **Columns (`FMT`)**: `{sample_row['FMT']}` (It contains {sample_row['CLS']} columns: {sample_row['FMT']})
+        - **Scale**: It contains **{int(sample_row['RTY']):,}** rows and occupies **{int(sample_row['SZY']):,}** bytes.
+        """)
+
+    _get_row_interpretation()
     return
 
 
 @app.cell
 def _(mo, mrfiles_df):
-    _mask = mrfiles_df['FIL'] == 'AMBIGLUI.RRF'
-    _sample_row = mrfiles_df[_mask].iloc[0] if _mask.any() else mrfiles_df.iloc[0]
+    def _get_dataset_summary():
+        total_files = len(mrfiles_df)
+        total_records = mrfiles_df['RTY'].sum()
 
-    mo.md(f"""
-    ### 🔍 Row Interpretation: `{_sample_row['FIL']}`
-    Let's break down the entry for the Ambiguous LUI identifiers file:
+        return mo.md(f"""
+        ### 📊 Dataset Summary
+        - **Total Files**: {total_files}
+        - **Total Records (All Files)**: {int(total_records):,}
 
-    - **File Name (`FIL`)**: `{_sample_row['FIL']}` (The physical file on disk)
-    - **Description (`DES`)**: *{_sample_row['DES']}*
-    - **Columns (`FMT`)**: `{_sample_row['FMT']}` (It contains {_sample_row['CLS']} columns: {_sample_row['FMT']})
-    - **Scale**: It contains **{int(_sample_row['RTY']):,}** rows and occupies **{int(_sample_row['SZY']):,}** bytes.
-    """)
-    return
+        #### Top 10 Largest Files (by Record Count)
+        """)
 
-
-@app.cell
-def _(mo, mrfiles_df):
-    total_files = len(mrfiles_df)
-    total_records = mrfiles_df['RTY'].sum()
-
-    mo.md(f"""
-    ### 📊 Dataset Summary
-    - **Total Files**: {total_files}
-    - **Total Records (All Files)**: {int(total_records):,}
-
-    #### Top 10 Largest Files (by Record Count)
-    """)
+    _get_dataset_summary()
     return
 
 
 @app.cell
 def _(mrfiles_df):
-    mrfiles_df.sort_values(by='RTY', ascending=False).head(10)
+    def _get_top_10_largest_files():
+        _df = mrfiles_df.sort_values(by='RTY', ascending=False)
+        _df = _df[['FIL', 'DES', 'RTY']]
+        _df = _df.reset_index(drop=True)
+        return _df.head(10)
+
+    _get_top_10_largest_files()
     return
 
 
