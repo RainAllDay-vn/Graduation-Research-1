@@ -17,7 +17,7 @@ def _():
     from knowledge_graph import KnowledgeGraph
     from dataset_specific.umls.data_loader import UmlsDataLoader
 
-    return KnowledgeGraph, UmlsDataLoader, mo, os
+    return KnowledgeGraph, UmlsDataLoader, mo, os, plt
 
 
 @app.cell
@@ -682,145 +682,157 @@ def _(mo):
 
 
 @app.cell
-def _(data_loader, mo, os):
-    mrconso_path = os.path.join(data_loader.extracted_path, 'META', 'MRCONSO.RRF')
-    _parquet_exists = os.path.exists(mrconso_path.replace('.RRF', '.parquet'))
-
-    run_conversion = mo.ui.checkbox(label="Convert/Re-generate Parquet cache", value=True)
-
-    mo.vstack([
-        run_conversion,
-        mo.md(f"**Parquet status**: {'✅ Optimized' if _parquet_exists else '⚠️ Raw RRF (Loading will be slow)'}")
-    ])
-    return mrconso_path, run_conversion
-
-
-@app.cell
-def _(data_loader, mrconso_path, run_conversion):
-    if run_conversion.value:
-        data_loader.convert_to_parquet(mrconso_path)
-    return
-
-
-@app.cell
 def _(data_loader):
+    data_loader.convert_to_parquet('META/MRCONSO.RRF')
+
     # Loading the full dataset.
     mrconso_df = data_loader.load_concepts()
     return (mrconso_df,)
 
 
 @app.cell
-def _(mo, mrconso_df):
-    _total_rows = len(mrconso_df)
-    _unique_cuis = mrconso_df['CUI'].nunique()
-    _unique_auis = mrconso_df['AUI'].nunique()
+def _(conso_sample_cui, mo, mrconso_df):
+    def _get_mrconso_scale_analysis():
+        total_rows = len(mrconso_df)
+        unique_cuis = mrconso_df['CUI'].nunique()
+        unique_auis = mrconso_df['AUI'].nunique()
 
-    # Calculate more stats
-    _null_counts = mrconso_df.isnull().sum().sum()
-    _mem_usage = mrconso_df.memory_usage(deep=True).sum() / (1024**2)
+        # Pick a sample CUI (Macroaggregated Albumin or the first concept)
+        sample_mask = mrconso_df['CUI'] == 'C0000005'
+        cui_terms = mrconso_df[sample_mask] if sample_mask.any() else mrconso_df.head(1)
+    
 
-    # Pick a sample CUI (Macroaggregated Albumin or the first concept)
-    _sample_mask = mrconso_df['CUI'] == 'C0000005'
-    _cui_terms = mrconso_df[_sample_mask] if _sample_mask.any() else mrconso_df.head(1)
-    conso_sample_cui = _cui_terms['CUI'].iloc[0]
+        return mo.md(f"""
+        ### 📊 MRCONSO Scale & Quality Analysis
+        - **Total Records (Atoms)**: {total_rows:,}
+        - **Unique Concepts (CUIs)**: {unique_cuis:,}
+        - **Unique Atoms (AUIs)**: {unique_auis:,}
+        - **Synonymy Ratio**: {total_rows/unique_cuis:.2f} names per concept on average.
+        """), conso_sample_cui
 
-    mo.md(f"""
-    ### 📊 MRCONSO Scale & Quality Analysis
-    - **Total Records (Atoms)**: {_total_rows:,}
-    - **Unique Concepts (CUIs)**: {_unique_cuis:,}
-    - **Unique Atoms (AUIs)**: {_unique_auis:,}
-    - **Synonymy Ratio**: {_total_rows/_unique_cuis:.2f} names per concept on average.
-    - **Memory Footprint**: {_mem_usage:.2f} MB
-    - **Total Missing Values**: {_null_counts:,}
+    _get_mrconso_scale_analysis()
+    return
 
-    #### Sample Terms for `{conso_sample_cui}`:
-    """)
+
+@app.cell
+def _(mrconso_df):
+    conso_sample_cui = mrconso_df.sample(n=1, random_state=42)['CUI'].iloc[0]
     return (conso_sample_cui,)
 
 
 @app.cell
-def _(mo, mrconso_df):
-    def plot_dist(col, title):
-        counts = mrconso_df[col].value_counts().head(15)
+def _(mo, mrconso_df, plt):
+    def _plot_dist(col, title):
+        # 1. Calculate normalized counts (percentages)
+        counts = mrconso_df[col].value_counts(normalize=True)
+    
+        # 2. Group everything under 5% into 'Others'
+        mask = counts >= 0.03
+        plot_data = counts[mask]
+    
+        if not counts[~mask].empty:
+            others_val = counts[~mask].sum()
+            plot_data['Others'] = others_val
+
+        # 3. Create the Matplotlib figure
+        # We use subplots to get a figure object for marimo to display
+        fig, ax = plt.subplots(figsize=(6, 6))
+    
+        ax.pie(
+            plot_data, 
+            labels=plot_data.index, 
+            autopct='%1.1f%%', 
+            startangle=140,
+            colors=plt.cm.Paired.colors
+        )
+        ax.set_title(title)
+    
+        # 4. Clean up and return
+        plt.close(fig)  # Prevents duplicate rendering in some environments
         return mo.vstack([
             mo.md(f"#### {title}"),
-            counts
+            fig
         ])
 
     mo.vstack([
-        plot_dist('LAT', 'Top Languages'),
-        plot_dist('SAB', 'Top Sources'),
-        plot_dist('TTY', 'Top Term Types'),
-        plot_dist('SUPPRESS', 'Suppress Status')
+        _plot_dist('LAT', 'Top Languages'),
+        _plot_dist('SAB', 'Top Sources'),
+        _plot_dist('TTY', 'Top Term Types'),
+        _plot_dist('SUPPRESS', 'Suppress Status')
     ], justify='start')
     return
 
 
 @app.cell
-def _(conso_sample_cui, mrconso_df):
-    # Show definitions for the same concept found above
-    mrconso_df[mrconso_df['CUI'] == conso_sample_cui]
-    return
-
-
-@app.cell
 def _(conso_sample_cui, mo, mrconso_df):
-    _sample_row = mrconso_df[mrconso_df['CUI'] == conso_sample_cui].iloc[0]
+    def _get_concept_interpretation():
+        sample_row = mrconso_df[mrconso_df['CUI'] == conso_sample_cui].iloc[0]
 
-    mo.md(f"""
-    ### 💡 Interpreting the Concept Atom (MRCONSO)
+        return mo.md(f"""
+        ### 💡 Interpreting the Concept Atom (MRCONSO)
 
-    `MRCONSO` contains 18 columns that together define the lineage and metadata of every term. Using the record for `{conso_sample_cui}` as an example:
+        `MRCONSO` contains 18 columns that together define the lineage and metadata of every term. Using the record for `{conso_sample_cui}` as an example:
 
-    | Field | Value | Meaning |
-    | :--- | :--- | :--- |
-    | **CUI** | `{_sample_row['CUI']}` | **Concept Unique Identifier**. The global ID shared by all synonyms. |
-    | **LAT** | `{_sample_row['LAT']}` | **Language**. The language of this specific name (e.g., `{_sample_row['LAT']}`). |
-    | **TS** | `{_sample_row['TS']}` | **Term Status**. `P` for Preferred, `S` for Synonym. |
-    | **LUI** | `{_sample_row['LUI']}` | **Lexical Unique Identifier**. Groups terms with the same normalized form. |
-    | **STT** | `{_sample_row['STT']}` | **String Type**. `PF` (Preferred form), `VC` (Variant), etc. |
-    | **SUI** | `{_sample_row['SUI']}` | **String Unique Identifier**. Unique ID for this exact text string. |
-    | **ISPREF** | `{_sample_row['ISPREF']}` | **Is Preferred**. `Y/N` if this atom is preferred in its source. |
-    | **AUI** | `{_sample_row['AUI']}` | **Atom Unique Identifier**. The unique occurrence of this term in this source. |
-    | **SAUI** | `{_sample_row['SAUI'] or 'N/A'}` | **Source Atom ID**. The original ID from the provider (if available). |
-    | **SCUI** | `{_sample_row['SCUI'] or 'N/A'}` | **Source Concept ID**. The provider's concept identifier. |
-    | **SDUI** | `{_sample_row['SDUI'] or 'N/A'}` | **Source Descriptor ID**. The provider's descriptor identifier. |
-    | **SAB** | `{_sample_row['SAB']}` | **Source Abbreviation**. Which vocabulary provided this name. |
-    | **TTY** | `{_sample_row['TTY']}` | **Term Type**. The role of this name (e.g., `PT` for primary term). |
-    | **CODE** | `{_sample_row['CODE']}` | **Source Code**. The specific code or ID in the source vocabulary. |
-    | **STR** | *"{_sample_row['STR']}"* | **String**. The actual name or label of the concept. |
-    | **SRL** | `{_sample_row['SRL']}` | **Source Restriction Level**. Used for licensing/copyright logic. |
-    | **SUPPRESS** | `{_sample_row['SUPPRESS']}` | **Suppress status**. `N` (active), `O` (obsolete), `Y` (suppressed). |
-    | **CVF** | `{_sample_row['CVF'] or 'N/A'}` | **Content View Flag**. Used to identify special subsets of data. |
+        | Field | Value | Meaning |
+        | :--- | :--- | :--- |
+        | **CUI** | `{sample_row['CUI']}` | **Concept Unique Identifier**. The global ID shared by all synonyms. |
+        | **LAT** | `{sample_row['LAT']}` | **Language**. The language of this specific name (e.g., `{sample_row['LAT']}`). |
+        | **TS** | `{sample_row['TS']}` | **Term Status**. `P` for Preferred, `S` for Synonym. |
+        | **LUI** | `{sample_row['LUI']}` | **Lexical Unique Identifier**. Groups terms with the same normalized form. |
+        | **STT** | `{sample_row['STT']}` | **String Type**. `PF` (Preferred form), `VC` (Variant), etc. |
+        | **SUI** | `{sample_row['SUI']}` | **String Unique Identifier**. Unique ID for this exact text string. |
+        | **ISPREF** | `{sample_row['ISPREF']}` | **Is Preferred**. `Y/N` if this atom is preferred in its source. |
+        | **AUI** | `{sample_row['AUI']}` | **Atom Unique Identifier**. The unique occurrence of this term in this source. |
+        | **SAUI** | `{sample_row['SAUI'] or 'N/A'}` | **Source Atom ID**. The original ID from the provider (if available). |
+        | **SCUI** | `{sample_row['SCUI'] or 'N/A'}` | **Source Concept ID**. The provider's concept identifier. |
+        | **SDUI** | `{sample_row['SDUI'] or 'N/A'}` | **Source Descriptor ID**. The provider's descriptor identifier. |
+        | **SAB** | `{sample_row['SAB']}` | **Source Abbreviation**. Which vocabulary provided this name. |
+        | **TTY** | `{sample_row['TTY']}` | **Term Type**. The role of this name (e.g., `PT` for primary term). |
+        | **CODE** | `{sample_row['CODE']}` | **Source Code**. The specific code or ID in the source vocabulary. |
+        | **STR** | *"{sample_row['STR']}"* | **String**. The actual name or label of the concept. |
+        | **SRL** | `{sample_row['SRL']}` | **Source Restriction Level**. Used for licensing/copyright logic. |
+        | **SUPPRESS** | `{sample_row['SUPPRESS']}` | **Suppress status**. `N` (active), `O` (obsolete), `Y` (suppressed). |
+        | **CVF** | `{sample_row['CVF'] or 'N/A'}` | **Content View Flag**. Used to identify special subsets of data. |
 
-    **The Analogy:**
-    If UMLS is a social network, the **CUI** is the **User Account (Identity)**. The **LUI/SUI/AUI** hierarchy tracks how that same person might use different spellings, plural forms, or handles (Atoms) across different platforms (Sources).
-    """)
+        **The Analogy:**
+        If UMLS is a social network, the **CUI** is the **User Account (Identity)**. The **LUI/SUI/AUI** hierarchy tracks how that same person might use different spellings, plural forms, or handles (Atoms) across different platforms (Sources).
+        """)
+
+    _get_concept_interpretation()
     return
 
 
 @app.cell
 def _(mo, mrconso_df):
-    _total_cuis = mrconso_df['CUI'].nunique()
-    _preferred_counts = mrconso_df[mrconso_df['ISPREF'] == 'Y'].groupby('CUI')['STR'].nunique()
+    def _get_preferred_str_analysis():
+        total_cuis = mrconso_df['CUI'].nunique()
+        preferred_counts = mrconso_df[mrconso_df['ISPREF'] == 'Y'].groupby('CUI')['STR'].nunique()
 
-    _no_preferred = _total_cuis - len(_preferred_counts)
-    _exactly_one = (_preferred_counts == 1).sum()
-    _more_than_one = (_preferred_counts > 1).sum()
+        no_preferred = total_cuis - len(preferred_counts)
+        exactly_one = (preferred_counts == 1).sum()
+        more_than_one = (preferred_counts > 1).sum()
 
-    _eng_preferred_counts = mrconso_df[
-        (mrconso_df['ISPREF'] == 'Y') & (mrconso_df['LAT'] == 'ENG')
-    ].groupby('CUI')['STR'].nunique()
-    _eng_exactly_one = (_eng_preferred_counts == 1).sum()
+        # Filter for English Preferred terms
+        eng_pref_df = mrconso_df[(mrconso_df['ISPREF'] == 'Y') & (mrconso_df['LAT'] == 'ENG')]
+    
+        # CUIs with at least one preferred term in English
+        eng_any_pref = eng_pref_df['CUI'].nunique()
+    
+        # CUIs with exactly one preferred term in English
+        eng_preferred_counts = eng_pref_df.groupby('CUI')['STR'].nunique()
+        eng_exactly_one = (eng_preferred_counts == 1).sum()
 
-    mo.md(f"""
-    ### 🎯 Preferred STR Analysis
-    - **Total CUIs**: {_total_cuis:,}
-    - **CUIs with NO preferred term**: {_no_preferred:,} ({_no_preferred/_total_cuis*100:.1f}%)
-    - **CUIs with exactly ONE preferred STR**: {_exactly_one:,} ({_exactly_one/_total_cuis*100:.1f}%)
-    - **CUIs with MORE than one preferred STR**: {_more_than_one:,} ({_more_than_one/_total_cuis*100:.1f}%)
-    - **CUIs with exactly ONE preferred STR in English**: {_eng_exactly_one:,} ({_eng_exactly_one/_total_cuis*100:.1f}%)
-    """)
+        return mo.md(f"""
+        ### 🎯 Preferred STR Analysis
+        - **Total CUIs**: {total_cuis:,}
+        - **CUIs with NO preferred term**: {no_preferred:,} ({no_preferred/total_cuis*100:.1f}%)
+        - **CUIs with exactly ONE preferred STR**: {exactly_one:,} ({exactly_one/total_cuis*100:.1f}%)
+        - **CUIs with MORE than one preferred STR**: {more_than_one:,} ({more_than_one/total_cuis*100:.1f}%)
+        - **CUIs with ANY preferred term in English**: {eng_any_pref:,} ({eng_any_pref/total_cuis*100:.1f}%)
+        - **CUIs with exactly ONE preferred STR in English**: {eng_exactly_one:,} ({eng_exactly_one/total_cuis*100:.1f}%)
+        """)
+
+    _get_preferred_str_analysis()
     return
 
 
@@ -964,7 +976,7 @@ def _(mo, mrconso_df, mrdef_df):
 @app.cell
 def _(mo):
     mo.md(r"""
-
+ 
     """)
     return
 
