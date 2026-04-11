@@ -150,43 +150,24 @@ def _(mo):
 @app.cell
 def _(data_loader):
     mrcols_df = data_loader.load_column_definitions()
+    mrcols_df.head(10)
     return (mrcols_df,)
 
 
 @app.cell
-def _(mrcols_df):
-    mrcols_df.head(10)
-    return
-
-
-@app.cell
 def _(mo, mrcols_df):
-    # Let's find a descriptive column for demonstration
-    _mask = mrcols_df['COL'] == 'CUI'
-    _sample_col = mrcols_df[_mask].iloc[0] if _mask.any() else mrcols_df.iloc[0]
+    def _get_column_interpretation():
+        mask = mrcols_df['COL'] == 'CUI'
+        sample_col = mrcols_df[mask].iloc[0] if mask.any() else mrcols_df.iloc[0]
 
-    mo.md(f"""
-    ### 🔍 Column Interpretation: `{_sample_col['COL']}` in `{_sample_col['FIL']}`
-    - **Description**: {_sample_col['DES']}
-    - **Data Type**: `{_sample_col['DTY']}`
-    - **Length Stats**: Min: {_sample_col['MIN']}, Avg: {_sample_col['AV']}, Max: {_sample_col['MAX']}
-    """)
-    return
+        return mo.md(f"""
+        ### 🔍 Column Interpretation: `{sample_col['COL']}` in `{sample_col['FIL']}`
+        - **Description**: {sample_col['DES']}
+        - **Data Type**: `{sample_col['DTY']}`
+        - **Length Stats**: Min: {sample_col['MIN']}, Avg: {sample_col['AV']}, Max: {sample_col['MAX']}
+        """)
 
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ### 📂 Column Lookup by File
-    Use the table below to explore columns for a specific file (e.g., `MRCONSO.RRF`).
-    """)
-    return
-
-
-@app.cell
-def _(mrcols_df):
-    # Filter for MRCONSO.RRF as a common example
-    mrcols_df[mrcols_df['FIL'] == 'MRCONSO.RRF']
+    _get_column_interpretation()
     return
 
 
@@ -213,55 +194,36 @@ def _(data_loader):
 
 
 @app.cell
-def _(mo, mrdoc_df):
-    dockey_counts = mrdoc_df['DOCKEY'].value_counts()
-
-    _header = mo.md(f"""
-    ### 📊 Dataset Overview
-    The documentation catalog contains **{len(dockey_counts)}** distinct categories. Below is the master view of the documentation map and the most frequent documentation types (**DOCKEY**):
-    """)
-
-    _view = mo.vstack([
-        mo.md("#### Sample Entries"),
-        mrdoc_df.head(5),
-        mo.md("#### Frequencies"),
-        dockey_counts.head(10)
-    ])
-    return
-
-
-@app.cell
 def _(mo, mrcols_df, mrdoc_df):
-    # Simplified lookup logic
-    def get_info(key):
-        desc = mrcols_df[mrcols_df['COL'] == key]['DES'].iloc[0] if key in mrcols_df['COL'].values else "Metadata Category"
-        data = mrdoc_df[mrdoc_df['DOCKEY'] == key]
-        return desc, data
+    def _get_dataset_overview():
+        def get_info(key):
+            desc = mrcols_df[mrcols_df['COL'] == key]['DES'].iloc[0] if key in mrcols_df['COL'].values else "Metadata Category"
+            return desc
+        
+        dockey_counts = mrdoc_df['DOCKEY'].value_counts().to_frame(name='count')
+        dockey_counts['description'] = dockey_counts.index.map(get_info)
+    
+        header = mo.md(f"""
+        ### 📊 Dataset Overview
+        The documentation catalog contains **{len(dockey_counts)}** distinct categories. Below is the master view of the documentation map and the most frequent documentation types (**DOCKEY**):
+        """)
 
-    atn_desc, atn_view = get_info('ATN')
-    rela_desc, rela_view = get_info('RELA')
+        atn_view = mrdoc_df[mrdoc_df['DOCKEY'] == 'ATN']
+        rela_view = mrdoc_df[mrdoc_df['DOCKEY'] == 'RELA']
 
-    mo.md(f"""
-    ## 🔍 Deep Dive: Common Metadata Keys
-    By linking **MRDOC** to **MRCOLS**, we can interpret high-volume documentation types:
+        view = mo.vstack([
+            mo.md("#### Frequencies"),
+            dockey_counts,
+            mo.md("#### Previews"),
+            mo.md("**Attributes (ATN):**"),
+            atn_view.head(5),
+            mo.md("**Relationship Labels (RELA):**"),
+            rela_view.head(5)
+        ])
 
-    | Key | Meaning (from MRCOLS) | Count | Purpose |
-    |-----|-------------------|-------|---------|
-    | **ATN** | *{atn_desc}* | {len(atn_view)} | Maps technical codes to readable attributes. |
-    | **RELA** | *{rela_desc}* | {len(rela_view):,} | Provides granular semantic context for relationships (e.g., `isa`, `part_of`). |
-    """)
-    return atn_view, rela_view
+        return mo.vstack([header, view])
 
-
-@app.cell
-def _(atn_view, mo, rela_view):
-    mo.vstack([
-        mo.md("### 📂 Interpretation Previews"),
-        mo.md("**Attributes (ATN):**"),
-        atn_view.head(5),
-        mo.md("**Relationship Labels (RELA):**"),
-        rela_view.head(5)
-    ])
+    _get_dataset_overview()
     return
 
 
@@ -285,13 +247,8 @@ def _(mo):
 @app.cell
 def _(data_loader):
     mrsab_df = data_loader.load_source_vocabularies()
-    return (mrsab_df,)
-
-
-@app.cell
-def _(mrsab_df):
     mrsab_df.head(10)
-    return
+    return (mrsab_df,)
 
 
 @app.cell
@@ -954,7 +911,7 @@ def _(mo, mrconso_df, mrdef_df):
 @app.cell
 def _(mo):
     mo.md(r"""
- 
+
     """)
     return
 
