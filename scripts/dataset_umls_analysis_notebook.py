@@ -463,12 +463,6 @@ def _(mo, srdef_df):
 
 
 @app.cell
-def _(semantic_types_df):
-    semantic_types_df[['UI', 'NAME', 'TREE', 'DEF']].sort_values(by='NAME').head(5)
-    return
-
-
-@app.cell
 def _(mo, srdef_df):
     def _get_hierarchy_analysis():
         semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
@@ -691,7 +685,7 @@ def _(data_loader):
 
 
 @app.cell
-def _(conso_sample_cui, mo, mrconso_df):
+def _(mo, mrconso_df):
     def _get_mrconso_scale_analysis():
         total_rows = len(mrconso_df)
         unique_cuis = mrconso_df['CUI'].nunique()
@@ -700,7 +694,7 @@ def _(conso_sample_cui, mo, mrconso_df):
         # Pick a sample CUI (Macroaggregated Albumin or the first concept)
         sample_mask = mrconso_df['CUI'] == 'C0000005'
         cui_terms = mrconso_df[sample_mask] if sample_mask.any() else mrconso_df.head(1)
-    
+
 
         return mo.md(f"""
         ### 📊 MRCONSO Scale & Quality Analysis
@@ -708,15 +702,15 @@ def _(conso_sample_cui, mo, mrconso_df):
         - **Unique Concepts (CUIs)**: {unique_cuis:,}
         - **Unique Atoms (AUIs)**: {unique_auis:,}
         - **Synonymy Ratio**: {total_rows/unique_cuis:.2f} names per concept on average.
-        """), conso_sample_cui
+        """)
 
     _get_mrconso_scale_analysis()
     return
 
 
 @app.cell
-def _(mrconso_df):
-    conso_sample_cui = mrconso_df.sample(n=1, random_state=42)['CUI'].iloc[0]
+def _():
+    conso_sample_cui = 'C0003123'
     return (conso_sample_cui,)
 
 
@@ -725,11 +719,11 @@ def _(mo, mrconso_df, plt):
     def _plot_dist(col, title):
         # 1. Calculate normalized counts (percentages)
         counts = mrconso_df[col].value_counts(normalize=True)
-    
+
         # 2. Group everything under 5% into 'Others'
         mask = counts >= 0.03
         plot_data = counts[mask]
-    
+
         if not counts[~mask].empty:
             others_val = counts[~mask].sum()
             plot_data['Others'] = others_val
@@ -737,7 +731,7 @@ def _(mo, mrconso_df, plt):
         # 3. Create the Matplotlib figure
         # We use subplots to get a figure object for marimo to display
         fig, ax = plt.subplots(figsize=(6, 6))
-    
+
         ax.pie(
             plot_data, 
             labels=plot_data.index, 
@@ -746,7 +740,7 @@ def _(mo, mrconso_df, plt):
             colors=plt.cm.Paired.colors
         )
         ax.set_title(title)
-    
+
         # 4. Clean up and return
         plt.close(fig)  # Prevents duplicate rendering in some environments
         return mo.vstack([
@@ -814,10 +808,10 @@ def _(mo, mrconso_df):
 
         # Filter for English Preferred terms
         eng_pref_df = mrconso_df[(mrconso_df['ISPREF'] == 'Y') & (mrconso_df['LAT'] == 'ENG')]
-    
+
         # CUIs with at least one preferred term in English
         eng_any_pref = eng_pref_df['CUI'].nunique()
-    
+
         # CUIs with exactly one preferred term in English
         eng_preferred_counts = eng_pref_df.groupby('CUI')['STR'].nunique()
         eng_exactly_one = (eng_preferred_counts == 1).sum()
@@ -865,187 +859,173 @@ def _(data_loader):
 
 @app.cell
 def _(mo, mrdef_df):
-    total_definitions = len(mrdef_df)
-    unique_cuis_with_def = mrdef_df['CUI'].nunique()
+    def _get_definitions_overview():
+        total_definitions = len(mrdef_df)
+        unique_cuis_with_def = mrdef_df['CUI'].nunique()
 
-    mo.md(f"""
-    ### 📊 Definitions Overview
-    - **Total Definitions**: {total_definitions:,}
-    - **Unique Concepts (CUIs) with Definitions**: {unique_cuis_with_def:,}
+        md = mo.md(f"""
+        ### 📊 Definitions Overview
+        - **Total Definitions**: {total_definitions:,}
+        - **Unique Concepts (CUIs) with Definitions**: {unique_cuis_with_def:,}
 
-    #### Sample Definitions:
-    """)
-    return
+        #### Sample Definitions:
+        """)
+    
+        return mo.vstack([
+            md,
+            mrdef_df.head(10)
+        ])    
 
-
-@app.cell
-def _(mrdef_df):
-    mrdef_df.head(10)
+    _get_definitions_overview()
     return
 
 
 @app.cell
 def _(mo, mrdef_df, mrsab_df):
-    _counts = mrdef_df['SAB'].value_counts().reset_index()
-    _counts.columns = ['RSAB', 'Definition Count']
+    def _get_source_distribution():
+        counts = mrdef_df['SAB'].value_counts().reset_index()
+        counts.columns = ['RSAB', 'Definition Count']
 
-    # Join with MRSAB to get full names and languages
-    source_distribution = _counts.merge(
-        mrsab_df[['RSAB', 'SON', 'LAT']].drop_duplicates('RSAB'),
-        on='RSAB',
-        how='left'
-    )
+        # Join with MRSAB to get full names and languages
+        source_distribution = counts.merge(
+            mrsab_df[['RSAB', 'SON', 'LAT']].drop_duplicates('RSAB'),
+            on='RSAB',
+            how='left'
+        )
 
-    _text = mo.md(f"""
-    ### 📂 Source Distribution
-    UMLS aggregates definitions from many sources. Below are the top 10 contributors of definitions, joined with their official metadata from `MRSAB.RRF`:
-    """)
+        md = mo.md(f"""
+        ### 📂 Source Distribution
+        UMLS aggregates definitions from many sources. Below are the top 10 contributors of definitions, joined with their official metadata from `MRSAB.RRF`:
+        """)
+
+        return mo.vstack([
+            md,
+            source_distribution
+        ])
+
+    _get_source_distribution()
     return
 
 
 @app.cell
-def _(mo, mrdef_df):
-    # Let's pick a specific concept with a definition
-    _sample_mask = mrdef_df['CUI'] == 'C0003123'
-    _cui_definitions = mrdef_df[_sample_mask] if _sample_mask.any() else mrdef_df.head(1)
-    sample_cui = _cui_definitions['CUI'].iloc[0]
+def _(conso_sample_cui, mo, mrdef_df):
+    def _get_concept_deep_dive():
+        # Filter for the specific concept
+        sample_row = mrdef_df[mrdef_df['CUI'] == conso_sample_cui]
 
-    mo.md(f"""
-    ### 🔍 Concept Deep Dive: `{sample_cui}`
-    Let's look at the definitions available for a specific concept:
-    """)
-    return (sample_cui,)
+        # Handle case where no row is found to prevent index errors
+        if sample_row.empty:
+            return mo.md(f"No definition found for CUI: `{conso_sample_cui}`")
 
+        # Extract values safely using .iloc[0]
+        cui_val = sample_row['CUI'].iloc[0]
+        aui_val = sample_row['AUI'].iloc[0]
+        sab_val = sample_row['SAB'].iloc[0]
+        def_val = sample_row['DEF'].iloc[0]
+        sup_val = sample_row['SUPPRESS'].iloc[0]
 
-@app.cell
-def _(mrdef_df, sample_cui):
-    # Show definitions for the same concept found above
-    mrdef_df[mrdef_df['CUI'] == sample_cui]
+        return mo.vstack([
+            mo.md(f"""
+            ### 🔍 Concept Deep Dive: `{conso_sample_cui}`
+            Let's look at the definitions available for a specific concept:
+            """),
+            sample_row,
+            mo.md(f"""
+            #### Interpretation
+        
+            | Field | Value (from sample) | Meaning |
+            | :--- | :--- | :--- |
+            | **CUI** | `{cui_val}` | **Concept Unique Identifier**. The "Master ID" for this medical idea. |
+            | **AUI** | `{aui_val}` | **Atom Unique Identifier**. Definitions are often tied to a specific term (atom) from the source. |
+            | **SAB** | `{sab_val}` | **Source Abbreviation**. Tells us which vocabulary (e.g., `{sab_val}`) provided the definition. |
+            | **DEF** | *"{def_val[:150]}..."* | **The actual text**. This provides the semantic meaning for the concept. |
+            | **SUPPRESS** | `{sup_val}` | **Suppress status**. `N` usually means this is an active, non-suppressed definition. |
+    
+            **The Analogy:**
+            If `MRCONSO` is the dictionary index—telling you all the names for a concept—then `MRDEF` is the **dictionary entry itself**, providing the formal medical explanation of what it actually is.
+            """)
+        ])
+
+    _get_concept_deep_dive()
     return
 
 
 @app.cell
-def _(mo, mrdef_df, sample_cui):
-    _sample_row = mrdef_df[mrdef_df['CUI'] == sample_cui].iloc[0]
+def _(conso_sample_cui, mo, mrconso_df, mrdef_df):
+    def _get_random_sample_comparison():
+        term_name = mrconso_df[mrconso_df['CUI'] == conso_sample_cui]['STR'].iloc[0]
+        defn_series = mrdef_df[mrdef_df['CUI'] == conso_sample_cui]['DEF']
 
-    mo.md(f"""
-    ### 💡 Interpreting the Definition Record
+        definition_elements = [
+            mo.md(f"**{i}.** {text}") 
+            for i, text in enumerate(defn_series, 1)
+        ]
 
-    Using the record for `{sample_cui}` as an example:
+        return mo.vstack([
+            mo.md('''
+            #### Comparing Names to Definitions
+        
+            Let's explore how much more detail the definitions provide compared to just the term names (STR) from MRCONSO.
+            '''),
+            mo.md(f"**Name (STR)**: {term_name}"),
+            mo.md(f"**Definitions (DEF)**:"),
+            *definition_elements
+        ])
 
-    | Field | Value (from sample) | Meaning |
-    | :--- | :--- | :--- |
-    | **CUI** | `{_sample_row['CUI']}` | **Concept Unique Identifier**. The "Master ID" for this medical idea. |
-    | **AUI** | `{_sample_row['AUI']}` | **Atom Unique Identifier**. Definitions are often tied to a specific term (atom) from the source. |
-    | **SAB** | `{_sample_row['SAB']}` | **Source Abbreviation**. Tells us which vocabulary (e.g., `{_sample_row['SAB']}`) provided the definition. |
-    | **DEF** | *"{_sample_row['DEF'][:150]}..."* | **The actual text**. This provides the semantic meaning for the concept. |
-    | **SUPPRESS** | `{_sample_row['SUPPRESS']}` | **Suppress status**. `{_sample_row['SUPPRESS']}` means this is an active, non-suppressed definition. |
-
-    **The Analogy:**
-    If `MRCONSO` (which we'll explore next) is the dictionary index—telling you all the names for a concept—then `MRDEF` is the **dictionary entry itself**, providing the formal medical explanation of what it actually is.
-    """)
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ##### Comparing Names to Definitions
-
-    Let's explore how much more detail the definitions provide compared to just the term names (STR) from MRCONSO.
-    """)
-    return
-
-
-@app.cell
-def _(mo, mrconso_df, mrdef_df):
-    _sample_cui = mrdef_df['CUI'].sample(n=1, random_state=42).iloc[0]
-
-    _str = mrconso_df[mrconso_df['CUI'] == _sample_cui]['STR']
-    _def = mrdef_df[mrdef_df['CUI'] == _sample_cui]['DEF']
-
-    mo.vstack([
-        mo.md(f"### 🔍 Random Sample: CUI `{_sample_cui}`"),
-        mo.md(f"**Name (STR)**: {_str.iloc[0] if len(_str) > 0 else 'N/A'}"),
-        mo.md(f"**Definition (DEF)**:"),
-        _def.iloc[0] if len(_def) > 0 else "No definition found"
-    ])
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
- 
-    """)
-    return
-
-
-@app.cell
-def _(mrdef_df):
-    total_rows = len(mrdef_df)
-    unique_cuis = mrdef_df['CUI'].nunique()
-    duplicate_cuis = mrdef_df['CUI'].value_counts()
-    most_common_cui = duplicate_cuis.idxmax()
-    most_common_count = duplicate_cuis.max()
-    return most_common_count, most_common_cui, total_rows, unique_cuis
-
-
-@app.cell
-def _(mo, total_rows, unique_cuis):
-    mo.md(f"""
-    ### 📊 CUI Distribution Analysis
-    In MRDEF, the number of unique CUIs is less than the total number of rows. This is because a single concept can have multiple definitions from different sources.
-
-    - **Total Rows**: {total_rows:,}
-    - **Unique CUIs**: {unique_cuis:,}
-    - **Difference**: {total_rows - unique_cuis:,} rows have duplicate CUIs
-
-    This means on average each CUI has **{total_rows/unique_cuis:.2f}** definitions from different sources.
-    """)
-    return
-
-
-@app.cell
-def _(mo, most_common_count, most_common_cui):
-    mo.md(f"""
-    ##### CUI with Most Definitions: `{most_common_cui}`
-    This concept has **{most_common_count}** different definitions from various sources.
-    """)
-    return
-
-
-@app.cell
-def _(most_common_cui, mrdef_df):
-    _df = mrdef_df[mrdef_df['CUI'] == most_common_cui]
-    _df = _df.sample(n=10, random_state = 42).reset_index(drop=True)
-    _df = _df[['CUI', 'DEF']]
-    _df
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    Let's calculate what percentage of concepts in MRCONSO have at least one definition in MRDEF.
-    """)
+    _get_random_sample_comparison()
     return
 
 
 @app.cell
 def _(mo, mrconso_df, mrdef_df):
-    _total_unique_cuis_conso = mrconso_df['CUI'].nunique()
-    _unique_cuis_with_def = mrdef_df['CUI'].nunique()
-    _percentage = (_unique_cuis_with_def / _total_unique_cuis_conso) * 100
+    def _get_cui_distribution():
+        total_rows = len(mrdef_df)
+        unique_cuis = mrdef_df['CUI'].nunique()
+        duplicate_cuis = mrdef_df['CUI'].value_counts()
+        most_common_cui = duplicate_cuis.idxmax()
+        most_common_count = duplicate_cuis.max()
 
-    mo.md(f'''
-    ### 📈 Definition Coverage
-    - **Total Unique CUIs in MRCONSO**: {_total_unique_cuis_conso:,}
-    - **CUIs with Definitions in MRDEF**: {_unique_cuis_with_def:,}
-    - **Coverage**: **{_percentage:.2f}%**
+        md1 = mo.md(f"""
+        ### 📊 CUI Distribution Analysis
+        In MRDEF, the number of unique CUIs is less than the total number of rows. This is because a single concept can have multiple definitions from different sources.
 
-    This means that less than 10% of the concepts in UMLS have formal definitions available. Many concepts are represented only by their names/synonyms without detailed definitions.
-    ''')
+        - **Total Rows**: {total_rows:,}
+        - **Unique CUIs**: {unique_cuis:,}
+        - **Difference**: {total_rows - unique_cuis:,} rows have duplicate CUIs
+
+        This means on average each CUI has **{total_rows/unique_cuis:.2f}** definitions from different sources.
+        """)
+
+        md2 = mo.md(f"""
+        CUI with Most Definitions is `{most_common_cui}`. This concept has **{most_common_count}** different definitions from various sources.
+        """)
+
+        df = mrdef_df[mrdef_df['CUI'] == most_common_cui]
+        df = df.sample(n=10, random_state = 42).reset_index(drop=True)
+        df = df[['CUI', 'DEF']]
+    
+        total_unique_cuis_conso = mrconso_df['CUI'].nunique()
+        unique_cuis_with_def = mrdef_df['CUI'].nunique()
+        percentage = (unique_cuis_with_def / total_unique_cuis_conso) * 100
+
+        md3 = mo.md(f'''
+        ### 📈 Definition Coverage
+        Let's calculate what percentage of concepts in MRCONSO have at least one definition in MRDEF.
+        - **Total Unique CUIs in MRCONSO**: {total_unique_cuis_conso:,}
+        - **CUIs with Definitions in MRDEF**: {unique_cuis_with_def:,}
+        - **Coverage**: **{percentage:.2f}%**
+
+        This means that less than 10% of the concepts in UMLS have formal definitions available. Many concepts are represented only by their names/synonyms without detailed definitions.
+        ''')
+
+        return mo.vstack([
+            md1,
+            md2,
+            df,
+            md3
+        ])
+
+    _get_cui_distribution()
     return
 
 
