@@ -667,24 +667,6 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    mo.md(r"""
-    ### ⚡ Performance Optimization (Optional)
-    Convert the raw RRF file to Parquet format for significantly faster loading and analysis.
-    """)
-    return
-
-
-@app.cell
-def _(data_loader):
-    data_loader.convert_to_parquet('META/MRCONSO.RRF')
-
-    # Loading the full dataset.
-    mrconso_df = data_loader.load_concepts()
-    return (mrconso_df,)
-
-
-@app.cell
 def _(mo, mrconso_df):
     def _get_mrconso_scale_analysis():
         total_rows = len(mrconso_df)
@@ -870,7 +852,7 @@ def _(mo, mrdef_df):
 
         #### Sample Definitions:
         """)
-    
+
         return mo.vstack([
             md,
             mrdef_df.head(10)
@@ -932,7 +914,7 @@ def _(conso_sample_cui, mo, mrdef_df):
             sample_row,
             mo.md(f"""
             #### Interpretation
-        
+
             | Field | Value (from sample) | Meaning |
             | :--- | :--- | :--- |
             | **CUI** | `{cui_val}` | **Concept Unique Identifier**. The "Master ID" for this medical idea. |
@@ -940,7 +922,7 @@ def _(conso_sample_cui, mo, mrdef_df):
             | **SAB** | `{sab_val}` | **Source Abbreviation**. Tells us which vocabulary (e.g., `{sab_val}`) provided the definition. |
             | **DEF** | *"{def_val[:150]}..."* | **The actual text**. This provides the semantic meaning for the concept. |
             | **SUPPRESS** | `{sup_val}` | **Suppress status**. `N` usually means this is an active, non-suppressed definition. |
-    
+
             **The Analogy:**
             If `MRCONSO` is the dictionary index—telling you all the names for a concept—then `MRDEF` is the **dictionary entry itself**, providing the formal medical explanation of what it actually is.
             """)
@@ -964,7 +946,7 @@ def _(conso_sample_cui, mo, mrconso_df, mrdef_df):
         return mo.vstack([
             mo.md('''
             #### Comparing Names to Definitions
-        
+
             Let's explore how much more detail the definitions provide compared to just the term names (STR) from MRCONSO.
             '''),
             mo.md(f"**Name (STR)**: {term_name}"),
@@ -1003,7 +985,7 @@ def _(mo, mrconso_df, mrdef_df):
         df = mrdef_df[mrdef_df['CUI'] == most_common_cui]
         df = df.sample(n=10, random_state = 42).reset_index(drop=True)
         df = df[['CUI', 'DEF']]
-    
+
         total_unique_cuis_conso = mrconso_df['CUI'].nunique()
         unique_cuis_with_def = mrdef_df['CUI'].nunique()
         percentage = (unique_cuis_with_def / total_unique_cuis_conso) * 100
