@@ -199,10 +199,10 @@ def _(mo, mrcols_df, mrdoc_df):
         def get_info(key):
             desc = mrcols_df[mrcols_df['COL'] == key]['DES'].iloc[0] if key in mrcols_df['COL'].values else "Metadata Category"
             return desc
-        
+
         dockey_counts = mrdoc_df['DOCKEY'].value_counts().to_frame(name='count')
         dockey_counts['description'] = dockey_counts.index.map(get_info)
-    
+
         header = mo.md(f"""
         ### 📊 Dataset Overview
         The documentation catalog contains **{len(dockey_counts)}** distinct categories. Below is the master view of the documentation map and the most frequent documentation types (**DOCKEY**):
@@ -253,30 +253,40 @@ def _(data_loader):
 
 @app.cell
 def _(mo, mrsab_df):
-    lang_counts = mrsab_df['LAT'].value_counts()
+    def _get_global_reach():
+        lang_counts = mrsab_df['LAT'].value_counts()
 
-    _text = mo.md(f"""
-    ### 🌍 Global Reach
-    The current release includes contents in **{len(lang_counts)}** languages.
+        md = mo.md(f"""
+        ### 🌍 Global Reach
+        The current release includes contents in **{len(lang_counts)}** languages.
 
-    #### Sources by Language (Top 10)
-    """)
+        #### Sources by Language (Top 10)
+        """)
+    
+        return mo.vstack([
+            md,
+            lang_counts
+        ])
+
+    _get_global_reach()
     return
 
 
 @app.cell
 def _(mo, mrsab_df):
-    # Example: Look for a major source
-    _major_source = mrsab_df[mrsab_df['RSAB'] == 'MSH'].iloc[0] if 'MSH' in mrsab_df['RSAB'].values else mrsab_df.iloc[0]
+    def _get_source_detailed_preview():
+        major_source = mrsab_df[mrsab_df['RSAB'] == 'MSH'].iloc[0] if 'MSH' in mrsab_df['RSAB'].values else mrsab_df.iloc[0]
 
-    mo.md(f"""
-    ### 🔍 Source Detailed Preview: `{_major_source['RSAB']}`
-    - **Official Name**: {_major_source['SON']}
-    - **Family**: {_major_source['SF'] or 'N/A'}
-    - **Version**: `{_major_source['SVER']}`
-    - **Language**: {_major_source['LAT']}
-    - **Scale**: Contains **{int(_major_source['CFR']):,}** concepts (CUIs).
-    """)
+        return mo.md(f"""
+        ### 🔍 Source Detailed Preview: `{major_source['RSAB']}`
+        - **Official Name**: {major_source['SON']}
+        - **Family**: {major_source['SF'] or 'N/A'}
+        - **Version**: `{major_source['SVER']}`
+        - **Language**: {major_source['LAT']}
+        - **Scale**: Contains **{int(major_source['CFR']):,}** concepts (CUIs).
+        """)
+
+    _get_source_detailed_preview()
     return
 
 
@@ -299,24 +309,7 @@ def _(mo):
 @app.cell
 def _(data_loader):
     mrrank_df = data_loader.load_ranking_metadata()
-    return (mrrank_df,)
-
-
-@app.cell
-def _(mrrank_df):
     mrrank_df.sort_values(by='RANK', ascending=False).head(10)
-    return
-
-
-@app.cell
-def _(mo, mrrank_df):
-    # Example for MTH (Metathesaurus source)
-    mth_ranking = mrrank_df[mrrank_df['SAB'] == 'MTH'].sort_values(by='RANK', ascending=False)
-
-    _text = mo.md(f"""
-    ### 🔍 Ranking Insight: `MTH` (Metathesaurus)
-    In the `MTH` source, the top-ranked term types are shown below. A rank of **{mth_ranking['RANK'].max() if not mth_ranking.empty else 'N/A'}** is assigned to the most preferred term type (**{mth_ranking['TTY'].iloc[0] if not mth_ranking.empty else 'N/A'}**).
-    """)
     return
 
 
