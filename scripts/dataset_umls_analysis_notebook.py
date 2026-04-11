@@ -262,7 +262,7 @@ def _(mo, mrsab_df):
 
         #### Sources by Language (Top 10)
         """)
-    
+
         return mo.vstack([
             md,
             lang_counts
@@ -310,6 +310,20 @@ def _(mo):
 def _(data_loader):
     mrrank_df = data_loader.load_ranking_metadata()
     mrrank_df.sort_values(by='RANK', ascending=False).head(10)
+    return (mrrank_df,)
+
+
+@app.cell
+def _(mo, mrrank_df):
+    def _get_ranking_insight():
+        mth_ranking = mrrank_df[mrrank_df['SAB'] == 'MTH'].sort_values(by='RANK', ascending=False)
+
+        return mo.md(f"""
+        ### 🔍 Ranking Insight: `MTH` (Metathesaurus)
+        In the `MTH` source, the top-ranked term types are shown below. A rank of **{mth_ranking['RANK'].max() if not mth_ranking.empty else 'N/A'}** is assigned to the most preferred term type (**{mth_ranking['TTY'].iloc[0] if not mth_ranking.empty else 'N/A'}**).
+        """)
+
+    _get_ranking_insight()
     return
 
 
@@ -374,6 +388,7 @@ def _(mo):
 @app.cell
 def _(data_loader):
     srfil_df = data_loader.load_semantic_network_files()
+    srfil_df.head(10)
     return
 
 
@@ -397,11 +412,14 @@ def _(mo):
 def _(data_loader, mo):
     srfld_df = data_loader.load_semantic_network_fields()
 
-    _text = mo.md(f"""
-    ### 📊 Semantic Network Metadata Summary
-    - **Unique Fields**: {srfld_df['COL'].nunique()}
-    - **Files Covered**: {srfld_df['FIL'].nunique()}
-    """)
+    def _get_semantic_network_summary():
+        return mo.md(f"""
+        ### 📊 Semantic Network Metadata Summary
+        - **Unique Fields**: {srfld_df['COL'].nunique()}
+        - **Files Covered**: {srfld_df['FIL'].nunique()}
+        """)
+
+    _get_semantic_network_summary()
     return
 
 
@@ -432,22 +450,15 @@ def _(data_loader):
 
 
 @app.cell
-def _(srdef_df):
-    # Split for easier analysis
-    semantic_types_df = srdef_df[srdef_df['RT'] == 'STY'].copy()
-    semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL'].copy()
-    return semantic_relations_df, semantic_types_df
+def _(mo, srdef_df):
+    def _split_srdef():
+        semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
+        return mo.vstack([
+            mo.md(f"**Semantic Types** ({len(semantic_types_df)} entries - Showing 5):"),
+            semantic_types_df.head(5)
+        ])
 
-
-@app.cell
-def _(mo, semantic_relations_df, semantic_types_df):
-    mo.md(f"""
-    ### 📊 Inventory Summary
-    - **Total Semantic Types (`STY`)**: {len(semantic_types_df)}
-    - **Total Semantic Relations (`RL`)**: {len(semantic_relations_df)}
-
-    #### Top 5 Semantic Types (Alphabetical)
-    """)
+    _split_srdef()
     return
 
 
@@ -458,17 +469,25 @@ def _(semantic_types_df):
 
 
 @app.cell
-def _(mo, semantic_types_df):
-    # Analyze the hierarchy depth
-    semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\\.') + 1
-    depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
+def _(mo, srdef_df):
+    def _get_hierarchy_analysis():
+        semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
+        semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\\.') + 1
+        depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
 
-    _text = mo.md(f"""
-    ### 🌳 Hierarchy Analysis
-    The semantic network has a maximum depth of **{semantic_types_df['DEPTH'].max()}** levels.
+        md = mo.md(f"""
+        ### 🌳 Hierarchy Analysis
+        The semantic network has a maximum depth of **{semantic_types_df['DEPTH'].max()}** levels.
 
-    #### Distribution of Semantic Types by Depth:
-    """)
+        #### Distribution of Semantic Types by Depth:
+        """)
+
+        return mo.vstack([
+            md,
+            depth_stats
+        ])
+
+    _get_hierarchy_analysis()
     return
 
 
@@ -495,18 +514,21 @@ def _(mo):
 
 
 @app.cell
-def _(mo, semantic_types_df):
-    # Deep dive into a common type: "Disease or Syndrome" (T047)
-    _mask = semantic_types_df['UI'] == 'T047'
-    _sample_type = semantic_types_df[_mask].iloc[0] if _mask.any() else semantic_types_df.iloc[0]
+def _(mo, srdef_df):
+    def _get_semantic_type_deep_dive():
+        semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
+        mask = semantic_types_df['UI'] == 'T047'
+        sample_type = semantic_types_df[mask].iloc[0] if mask.any() else semantic_types_df.iloc[0]
 
-    mo.md(f"""
-    ### 🔍 Semantic Type Deep Dive: `{_sample_type['NAME']}` ({_sample_type['UI']})
-    - **Hierarchy Path (`TREE`)**: `{_sample_type['TREE']}`
-    - **Definition**: *{_sample_type['DEF']}*
-    - **Examples**: {_sample_type['EX'] or "None listed."}
-    - **Abbreviation**: `{_sample_type['AB']}`
-    """)
+        return mo.md(f"""
+        ### Sample entry: `{sample_type['NAME']}` ({sample_type['UI']})
+        - **Hierarchy Path (`TREE`)**: `{sample_type['TREE']}`
+        - **Definition**: *{sample_type['DEF']}*
+        - **Examples**: {sample_type['EX'] or "None listed."}
+        - **Abbreviation**: `{sample_type['AB']}`
+        """)
+
+    _get_semantic_type_deep_dive()
     return
 
 
@@ -525,41 +547,79 @@ def _(mo):
 
 
 @app.cell
-def _(mo, semantic_relations_df):
-    # Analyze inverses
-    relation_summary = semantic_relations_df[['UI', 'NAME', 'RIN', 'TREE', 'DEF']].sort_values(by='NAME')
+def _(mo, srdef_df):
+    def _split_srdef():
+        semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL']
+        return mo.vstack([
+            mo.md(f"**Semantic Relations** ({len(semantic_relations_df)} entries - Showing 5):"),
+            semantic_relations_df.head(5)
+        ])
 
-    _text = mo.md(f"""
-    ### 🔗 Relation Registry & Inverse Mapping
-    Below is the complete list of defined relations and their respective inverses:
-    """)
-    return (relation_summary,)
-
-
-@app.cell
-def _(mo, semantic_relations_df):
-    # Identify symmetric vs asymmetric relations
-    symmetric = semantic_relations_df[semantic_relations_df['NAME'] == semantic_relations_df['RIN']]
-    asymmetric = semantic_relations_df[semantic_relations_df['NAME'] != semantic_relations_df['RIN']]
-
-    mo.md(f"""
-    ### ⚖️ Symmetry Analysis
-    - **Symmetric Relations**: {len(symmetric)} (e.g., `{symmetric['NAME'].iloc[0] if not symmetric.empty else 'N/A'}`)
-    - **Asymmetric Relations**: {len(asymmetric)} (e.g., `{asymmetric['NAME'].iloc[0] if not asymmetric.empty else 'N/A'}` → `{asymmetric['RIN'].iloc[0] if not asymmetric.empty else 'N/A'}`)
-    """)
+    _split_srdef()
     return
 
 
 @app.cell
-def _(mo, relation_summary):
-    # Identify top-level relations (depth 1)
-    relation_summary['DEPTH'] = relation_summary['TREE'].str.count('\\.') + 1
-    top_relations = relation_summary[relation_summary['DEPTH'] == 1]
+def _(mo, srdef_df):
+    def _get_relation_registry():
+        semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL']
+        relation_summary = semantic_relations_df[['UI', 'NAME', 'RIN', 'TREE', 'DEF']].sort_values(by='NAME')
 
-    _text = mo.md(f"""
-    ### 🏘️ Relation Hierarchy (Root Branches)
-    Just like Semantic Types, relations are organized into a hierarchy. There are **{len(top_relations)}** major branches of relationships:
-    """)
+        text = mo.md(f"""
+        ### 🔗 Relation Registry & Inverse Mapping
+        Below is the complete list of defined relations and their respective inverses:
+        """)
+
+        return mo.vstack([
+            text,
+            relation_summary
+        ])
+
+    _get_relation_registry()
+    return
+
+
+@app.cell
+def _(mo, srdef_df):
+    def _get_symmetry_analysis():
+        semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL']
+        symmetric = semantic_relations_df[semantic_relations_df['NAME'] == semantic_relations_df['RIN']]
+        asymmetric = semantic_relations_df[semantic_relations_df['NAME'] != semantic_relations_df['RIN']]
+
+        return mo.md(f"""
+        ### ⚖️ Symmetry Analysis
+        - **Symmetric Relations**: {len(symmetric)} (e.g., `{symmetric['NAME'].iloc[0] if not symmetric.empty else 'N/A'}`)
+        - **Asymmetric Relations**: {len(asymmetric)} (e.g., `{asymmetric['NAME'].iloc[0] if not asymmetric.empty else 'N/A'}` → `{asymmetric['RIN'].iloc[0] if not asymmetric.empty else 'N/A'}`)
+        """)
+
+    _get_symmetry_analysis()
+    return
+
+
+@app.cell
+def _(mo, srdef_df):
+    def _get_relation_hierarchy():
+        # Filter for Relations (RL)
+        semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL'].copy()
+
+        # Calculate depth based on tree dots (e.g., 'R1.1.2' has 2 dots, depth 3)
+        semantic_relations_df['DEPTH'] = semantic_relations_df['TREE'].str.count('\\.') + 1
+
+        # Summarize counts per depth level
+        depth_counts = semantic_relations_df['DEPTH'].value_counts().sort_index().reset_index()
+        depth_counts.columns = ['Depth Level', 'Number of Relations']
+
+        md = mo.md(f"""
+        ### 🏘️ Relation Hierarchy (Root Branches)
+        Just like Semantic Types, relations are organized into a hierarchy. There are **{len(depth_counts)}** distinct levels of depth in the relationship tree:
+        """)
+
+        return mo.vstack([
+            md,
+            mo.ui.table(depth_counts) # Assuming marimo's table UI for better readability
+        ])
+
+    _get_relation_hierarchy()
     return
 
 
