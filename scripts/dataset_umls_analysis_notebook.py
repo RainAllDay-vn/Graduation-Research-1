@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.1"
 app = marimo.App()
 
 
@@ -206,17 +206,12 @@ def _(data_loader):
 def _(mo, mrdoc_df):
     dockey_counts = mrdoc_df['DOCKEY'].value_counts()
 
-    mo.md(f"""
+    _header = mo.md(f"""
     ### 📊 Dataset Overview
     The documentation catalog contains **{len(dockey_counts)}** distinct categories. Below is the master view of the documentation map and the most frequent documentation types (**DOCKEY**):
     """)
-    return (dockey_counts,)
 
-
-@app.cell
-def _(dockey_counts, mo, mrdoc_df):
-    # Side-by-side or sequential overview
-    mo.vstack([
+    _view = mo.vstack([
         mo.md("#### Sample Entries"),
         mrdoc_df.head(5),
         mo.md("#### Frequencies"),
@@ -293,18 +288,12 @@ def _(mrsab_df):
 def _(mo, mrsab_df):
     lang_counts = mrsab_df['LAT'].value_counts()
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 🌍 Global Reach
     The current release includes contents in **{len(lang_counts)}** languages.
 
     #### Sources by Language (Top 10)
     """)
-    return (lang_counts,)
-
-
-@app.cell
-def _(lang_counts):
-    lang_counts.head(10)
     return
 
 
@@ -357,16 +346,10 @@ def _(mo, mrrank_df):
     # Example for MTH (Metathesaurus source)
     mth_ranking = mrrank_df[mrrank_df['SAB'] == 'MTH'].sort_values(by='RANK', ascending=False)
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 🔍 Ranking Insight: `MTH` (Metathesaurus)
     In the `MTH` source, the top-ranked term types are shown below. A rank of **{mth_ranking['RANK'].max() if not mth_ranking.empty else 'N/A'}** is assigned to the most preferred term type (**{mth_ranking['TTY'].iloc[0] if not mth_ranking.empty else 'N/A'}**).
     """)
-    return (mth_ranking,)
-
-
-@app.cell
-def _(mth_ranking):
-    mth_ranking.head(5)
     return
 
 
@@ -431,12 +414,6 @@ def _(mo):
 @app.cell
 def _(data_loader):
     srfil_df = data_loader.load_semantic_network_files()
-    return (srfil_df,)
-
-
-@app.cell
-def _(srfil_df):
-    srfil_df
     return
 
 
@@ -457,15 +434,10 @@ def _(mo):
 
 
 @app.cell
-def _(data_loader):
+def _(data_loader, mo):
     srfld_df = data_loader.load_semantic_network_fields()
-    srfld_df.head(10)
-    return (srfld_df,)
 
-
-@app.cell
-def _(mo, srfld_df):
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 📊 Semantic Network Metadata Summary
     - **Unique Fields**: {srfld_df['COL'].nunique()}
     - **Files Covered**: {srfld_df['FIL'].nunique()}
@@ -531,18 +503,12 @@ def _(mo, semantic_types_df):
     semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\\.') + 1
     depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 🌳 Hierarchy Analysis
     The semantic network has a maximum depth of **{semantic_types_df['DEPTH'].max()}** levels.
 
     #### Distribution of Semantic Types by Depth:
     """)
-    return (depth_stats,)
-
-
-@app.cell
-def _(depth_stats):
-    depth_stats
     return
 
 
@@ -603,17 +569,11 @@ def _(mo, semantic_relations_df):
     # Analyze inverses
     relation_summary = semantic_relations_df[['UI', 'NAME', 'RIN', 'TREE', 'DEF']].sort_values(by='NAME')
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 🔗 Relation Registry & Inverse Mapping
     Below is the complete list of defined relations and their respective inverses:
     """)
     return (relation_summary,)
-
-
-@app.cell
-def _(relation_summary):
-    relation_summary
-    return
 
 
 @app.cell
@@ -636,16 +596,10 @@ def _(mo, relation_summary):
     relation_summary['DEPTH'] = relation_summary['TREE'].str.count('\\.') + 1
     top_relations = relation_summary[relation_summary['DEPTH'] == 1]
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 🏘️ Relation Hierarchy (Root Branches)
     Just like Semantic Types, relations are organized into a hierarchy. There are **{len(top_relations)}** major branches of relationships:
     """)
-    return (top_relations,)
-
-
-@app.cell
-def _(top_relations):
-    top_relations[['UI', 'NAME', 'TREE', 'DEF']]
     return
 
 
@@ -679,14 +633,188 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 3.1 MRDEF.RRF (Definitions)
+    ## 3.1 MRCONSO.RRF (Concept Names and Sources)
+
+    **MRCONSO.RRF** is the most important file in the UMLS Metathesaurus. It is the central mapping table that links every concept (CUI) to its various names, codes from different vocabularies, and internal identifiers.
+
+    ### Key Concepts:
+    - **CUI**: Concept Unique Identifier (The "Master ID").
+    - **AUI**: Atom Unique Identifier (The specific "Name" from a source).
+    - **SAB**: Source Abbreviation (Who provided this name).
+    - **STR**: String (The actual name text).
+
+    ### Hierarchy of Term Identifiers:
+    1. **CUI** (Concept): The core semantic idea.
+    2. **LUI** (Lexical): Terms with the same normalized form.
+    3. **SUI** (String): Specific text variations (plural, case, etc).
+    4. **AUI** (Atom): The unique occurrence from a specific source.
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### ⚡ Performance Optimization (Optional)
+    Convert the raw RRF file to Parquet format for significantly faster loading and analysis.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader, mo, os):
+    mrconso_path = os.path.join(data_loader.extracted_path, 'META', 'MRCONSO.RRF')
+    _parquet_exists = os.path.exists(mrconso_path.replace('.RRF', '.parquet'))
+
+    run_conversion = mo.ui.checkbox(label="Convert/Re-generate Parquet cache", value=True)
+
+    mo.vstack([
+        run_conversion,
+        mo.md(f"**Parquet status**: {'✅ Optimized' if _parquet_exists else '⚠️ Raw RRF (Loading will be slow)'}")
+    ])
+    return mrconso_path, run_conversion
+
+
+@app.cell
+def _(data_loader, mrconso_path, run_conversion):
+    if run_conversion.value:
+        data_loader.convert_to_parquet(mrconso_path)
+    return
+
+
+@app.cell
+def _(data_loader):
+    # Loading the full dataset.
+    mrconso_df = data_loader.load_concepts()
+    return (mrconso_df,)
+
+
+@app.cell
+def _(mo, mrconso_df):
+    _total_rows = len(mrconso_df)
+    _unique_cuis = mrconso_df['CUI'].nunique()
+    _unique_auis = mrconso_df['AUI'].nunique()
+
+    # Calculate more stats
+    _null_counts = mrconso_df.isnull().sum().sum()
+    _mem_usage = mrconso_df.memory_usage(deep=True).sum() / (1024**2)
+
+    # Pick a sample CUI (Macroaggregated Albumin or the first concept)
+    _sample_mask = mrconso_df['CUI'] == 'C0000005'
+    _cui_terms = mrconso_df[_sample_mask] if _sample_mask.any() else mrconso_df.head(1)
+    conso_sample_cui = _cui_terms['CUI'].iloc[0]
+
+    mo.md(f"""
+    ### 📊 MRCONSO Scale & Quality Analysis
+    - **Total Records (Atoms)**: {_total_rows:,}
+    - **Unique Concepts (CUIs)**: {_unique_cuis:,}
+    - **Unique Atoms (AUIs)**: {_unique_auis:,}
+    - **Synonymy Ratio**: {_total_rows/_unique_cuis:.2f} names per concept on average.
+    - **Memory Footprint**: {_mem_usage:.2f} MB
+    - **Total Missing Values**: {_null_counts:,}
+
+    #### Sample Terms for `{conso_sample_cui}`:
+    """)
+    return (conso_sample_cui,)
+
+
+@app.cell
+def _(mo, mrconso_df):
+    def plot_dist(col, title):
+        counts = mrconso_df[col].value_counts().head(15)
+        return mo.vstack([
+            mo.md(f"#### {title}"),
+            counts
+        ])
+
+    mo.vstack([
+        plot_dist('LAT', 'Top Languages'),
+        plot_dist('SAB', 'Top Sources'),
+        plot_dist('TTY', 'Top Term Types'),
+        plot_dist('SUPPRESS', 'Suppress Status')
+    ], justify='start')
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mrconso_df):
+    # Show definitions for the same concept found above
+    mrconso_df[mrconso_df['CUI'] == conso_sample_cui]
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mo, mrconso_df):
+    _sample_row = mrconso_df[mrconso_df['CUI'] == conso_sample_cui].iloc[0]
+
+    mo.md(f"""
+    ### 💡 Interpreting the Concept Atom (MRCONSO)
+
+    `MRCONSO` contains 18 columns that together define the lineage and metadata of every term. Using the record for `{conso_sample_cui}` as an example:
+
+    | Field | Value | Meaning |
+    | :--- | :--- | :--- |
+    | **CUI** | `{_sample_row['CUI']}` | **Concept Unique Identifier**. The global ID shared by all synonyms. |
+    | **LAT** | `{_sample_row['LAT']}` | **Language**. The language of this specific name (e.g., `{_sample_row['LAT']}`). |
+    | **TS** | `{_sample_row['TS']}` | **Term Status**. `P` for Preferred, `S` for Synonym. |
+    | **LUI** | `{_sample_row['LUI']}` | **Lexical Unique Identifier**. Groups terms with the same normalized form. |
+    | **STT** | `{_sample_row['STT']}` | **String Type**. `PF` (Preferred form), `VC` (Variant), etc. |
+    | **SUI** | `{_sample_row['SUI']}` | **String Unique Identifier**. Unique ID for this exact text string. |
+    | **ISPREF** | `{_sample_row['ISPREF']}` | **Is Preferred**. `Y/N` if this atom is preferred in its source. |
+    | **AUI** | `{_sample_row['AUI']}` | **Atom Unique Identifier**. The unique occurrence of this term in this source. |
+    | **SAUI** | `{_sample_row['SAUI'] or 'N/A'}` | **Source Atom ID**. The original ID from the provider (if available). |
+    | **SCUI** | `{_sample_row['SCUI'] or 'N/A'}` | **Source Concept ID**. The provider's concept identifier. |
+    | **SDUI** | `{_sample_row['SDUI'] or 'N/A'}` | **Source Descriptor ID**. The provider's descriptor identifier. |
+    | **SAB** | `{_sample_row['SAB']}` | **Source Abbreviation**. Which vocabulary provided this name. |
+    | **TTY** | `{_sample_row['TTY']}` | **Term Type**. The role of this name (e.g., `PT` for primary term). |
+    | **CODE** | `{_sample_row['CODE']}` | **Source Code**. The specific code or ID in the source vocabulary. |
+    | **STR** | *"{_sample_row['STR']}"* | **String**. The actual name or label of the concept. |
+    | **SRL** | `{_sample_row['SRL']}` | **Source Restriction Level**. Used for licensing/copyright logic. |
+    | **SUPPRESS** | `{_sample_row['SUPPRESS']}` | **Suppress status**. `N` (active), `O` (obsolete), `Y` (suppressed). |
+    | **CVF** | `{_sample_row['CVF'] or 'N/A'}` | **Content View Flag**. Used to identify special subsets of data. |
+
+    **The Analogy:**
+    If UMLS is a social network, the **CUI** is the **User Account (Identity)**. The **LUI/SUI/AUI** hierarchy tracks how that same person might use different spellings, plural forms, or handles (Atoms) across different platforms (Sources).
+    """)
+    return
+
+
+@app.cell
+def _(mo, mrconso_df):
+    _total_cuis = mrconso_df['CUI'].nunique()
+    _preferred_counts = mrconso_df[mrconso_df['ISPREF'] == 'Y'].groupby('CUI')['STR'].nunique()
+
+    _no_preferred = _total_cuis - len(_preferred_counts)
+    _exactly_one = (_preferred_counts == 1).sum()
+    _more_than_one = (_preferred_counts > 1).sum()
+
+    _eng_preferred_counts = mrconso_df[
+        (mrconso_df['ISPREF'] == 'Y') & (mrconso_df['LAT'] == 'ENG')
+    ].groupby('CUI')['STR'].nunique()
+    _eng_exactly_one = (_eng_preferred_counts == 1).sum()
+
+    mo.md(f"""
+    ### 🎯 Preferred STR Analysis
+    - **Total CUIs**: {_total_cuis:,}
+    - **CUIs with NO preferred term**: {_no_preferred:,} ({_no_preferred/_total_cuis*100:.1f}%)
+    - **CUIs with exactly ONE preferred STR**: {_exactly_one:,} ({_exactly_one/_total_cuis*100:.1f}%)
+    - **CUIs with MORE than one preferred STR**: {_more_than_one:,} ({_more_than_one/_total_cuis*100:.1f}%)
+    - **CUIs with exactly ONE preferred STR in English**: {_eng_exactly_one:,} ({_eng_exactly_one/_total_cuis*100:.1f}%)
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 3.2 MRDEF.RRF (Definitions)
 
     **MRDEF.RRF** contains semantic definitions for the concepts in the Metathesaurus. While not every concept has a definition, this file is crucial for adding context and meaning beyond simple term labels.
 
-    ### Why Start Here?
-    - **Scale**: At ~317,000 rows, it is relatively small compared to `MRCONSO` (~15M+ rows in recent releases).
+    ### Why Explore this?
+    - **Scale**: At ~317,000 rows, it is much smaller than `MRCONSO`.
     - **Purpose**: It provides the "What does this mean?" layer.
-    - **Analogy**: After learning the names of concepts in `MRCONSO`, we use `MRDEF` to understand their actual definitions.
+    - **Analogy**: After learning the names of concepts in **MRCONSO (3.1)**, we use **MRDEF** to understand their actual definitions.
 
     ### Key Column Definitions:
     - **CUI**: Concept Unique Identifier.
@@ -736,16 +864,10 @@ def _(mo, mrdef_df, mrsab_df):
         how='left'
     )
 
-    mo.md(f"""
+    _text = mo.md(f"""
     ### 📂 Source Distribution
     UMLS aggregates definitions from many sources. Below are the top 10 contributors of definitions, joined with their official metadata from `MRSAB.RRF`:
     """)
-    return (source_distribution,)
-
-
-@app.cell
-def _(source_distribution):
-    source_distribution.head(10)
     return
 
 
@@ -790,6 +912,108 @@ def _(mo, mrdef_df, sample_cui):
     **The Analogy:**
     If `MRCONSO` (which we'll explore next) is the dictionary index—telling you all the names for a concept—then `MRDEF` is the **dictionary entry itself**, providing the formal medical explanation of what it actually is.
     """)
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ##### Comparing Names to Definitions
+
+    Let's explore how much more detail the definitions provide compared to just the term names (STR) from MRCONSO.
+    """)
+    return
+
+
+@app.cell
+def _(mo, mrconso_df, mrdef_df):
+    _sample_cui = mrdef_df['CUI'].sample(n=1, random_state=42).iloc[0]
+
+    _str = mrconso_df[mrconso_df['CUI'] == _sample_cui]['STR']
+    _def = mrdef_df[mrdef_df['CUI'] == _sample_cui]['DEF']
+
+    mo.vstack([
+        mo.md(f"### 🔍 Random Sample: CUI `{_sample_cui}`"),
+        mo.md(f"**Name (STR)**: {_str.iloc[0] if len(_str) > 0 else 'N/A'}"),
+        mo.md(f"**Definition (DEF)**:"),
+        _def.iloc[0] if len(_def) > 0 else "No definition found"
+    ])
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+ 
+    """)
+    return
+
+
+@app.cell
+def _(mrdef_df):
+    total_rows = len(mrdef_df)
+    unique_cuis = mrdef_df['CUI'].nunique()
+    duplicate_cuis = mrdef_df['CUI'].value_counts()
+    most_common_cui = duplicate_cuis.idxmax()
+    most_common_count = duplicate_cuis.max()
+    return most_common_count, most_common_cui, total_rows, unique_cuis
+
+
+@app.cell
+def _(mo, total_rows, unique_cuis):
+    mo.md(f"""
+    ### 📊 CUI Distribution Analysis
+    In MRDEF, the number of unique CUIs is less than the total number of rows. This is because a single concept can have multiple definitions from different sources.
+
+    - **Total Rows**: {total_rows:,}
+    - **Unique CUIs**: {unique_cuis:,}
+    - **Difference**: {total_rows - unique_cuis:,} rows have duplicate CUIs
+
+    This means on average each CUI has **{total_rows/unique_cuis:.2f}** definitions from different sources.
+    """)
+    return
+
+
+@app.cell
+def _(mo, most_common_count, most_common_cui):
+    mo.md(f"""
+    ##### CUI with Most Definitions: `{most_common_cui}`
+    This concept has **{most_common_count}** different definitions from various sources.
+    """)
+    return
+
+
+@app.cell
+def _(most_common_cui, mrdef_df):
+    _df = mrdef_df[mrdef_df['CUI'] == most_common_cui]
+    _df = _df.sample(n=10, random_state = 42).reset_index(drop=True)
+    _df = _df[['CUI', 'DEF']]
+    _df
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    Let's calculate what percentage of concepts in MRCONSO have at least one definition in MRDEF.
+    """)
+    return
+
+
+@app.cell
+def _(mo, mrconso_df, mrdef_df):
+    _total_unique_cuis_conso = mrconso_df['CUI'].nunique()
+    _unique_cuis_with_def = mrdef_df['CUI'].nunique()
+    _percentage = (_unique_cuis_with_def / _total_unique_cuis_conso) * 100
+
+    mo.md(f'''
+    ### 📈 Definition Coverage
+    - **Total Unique CUIs in MRCONSO**: {_total_unique_cuis_conso:,}
+    - **CUIs with Definitions in MRDEF**: {_unique_cuis_with_def:,}
+    - **Coverage**: **{_percentage:.2f}%**
+
+    This means that less than 10% of the concepts in UMLS have formal definitions available. Many concepts are represented only by their names/synonyms without detailed definitions.
+    ''')
     return
 
 

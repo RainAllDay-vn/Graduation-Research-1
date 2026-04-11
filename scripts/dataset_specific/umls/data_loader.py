@@ -15,8 +15,63 @@ class UmlsDataLoader(DataLoader):
         self.extracted_path = os.path.join(dataset_path, 'extracted', '2025AB')
         super().__init__(driver, dataset_path)
 
+    def convert_to_parquet(self, file_path: str, force: bool = False, columns: Optional[List[str]] = None):
+        """Explicitly converts an RRF file to Parquet format for faster loading."""
+        if file_path.endswith('.RRF'):
+            parquet_path = file_path.replace('.RRF', '.parquet')
+        else:
+            parquet_path = file_path + '.parquet'
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Source RRF file not found: {file_path}")
+            
+        if os.path.exists(parquet_path) and not force:
+            print(f"Parquet file already exists: {parquet_path}. Use force=True to overwrite.")
+            return
+
+        print(f"Converting {file_path} to Parquet...")
+        
+        # Attempt to auto-detect columns from metadata catalogs if not provided
+        if columns is None:
+            filename = os.path.basename(file_path)
+            # 1. Try META directory catalog (MRFILES.RRF)
+            try:
+                df_files = self.load_file_definitions()
+                file_info = df_files[df_files['FIL'] == filename]
+                if not file_info.empty:
+                    columns = file_info.iloc[0]['FMT'].split(',')
+                    print(f"Detected columns from MRFILES.RRF: {columns}")
+            except Exception:
+                pass
+            
+            # 2. Try NET directory catalog (SRFIL) as fallback
+            if columns is None:
+                try:
+                    df_net = self.load_semantic_network_files()
+                    file_info = df_net[df_net['FIL'] == filename]
+                    if not file_info.empty:
+                        columns = file_info.iloc[0]['FMT'].split(',')
+                        print(f"Detected columns from SRFIL: {columns}")
+                except Exception:
+                    pass
+
+        # Use low_memory=False for large files to avoid type inference issues
+        df = self._read_rrf(file_path, columns=columns, limit=None)
+        df.to_parquet(parquet_path, engine='pyarrow', index=False)
+        print(f"Saved to: {parquet_path}")
+
+
     def _read_rrf(self, file_path: str, columns: Optional[List[str]] = None, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
-        """Helper to read RRF files with pipe delimiters."""
+        """Helper to read files, preferring Parquet if available."""
+        if file_path.endswith('.RRF'):
+            parquet_path = file_path.replace('.RRF', '.parquet')
+        else:
+            parquet_path = file_path + '.parquet'
+        
+        # Prefer Parquet if it exists and we're not using limit/offset (which are tricky with Parquet unless we use Polars/PyArrow directly)
+        if os.path.exists(parquet_path) and limit is None and offset is None:
+            # print(f"Loading from Parquet: {parquet_path}")
+            return pd.read_parquet(parquet_path)
+
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"RRF file not found: {file_path}")
         
