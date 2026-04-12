@@ -110,16 +110,18 @@ class UmlsDataLoader(DataLoader):
         file_path = os.path.join(self.extracted_path, 'META', 'MRSAT.RRF')
         return self._read_rrf(file_path, limit=limit, offset=offset)
 
-    def load_semantic_types(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+    def load_semantic_types(self, limit: Optional[int] = None, offset: Optional[int] = None, chunksize: Optional[int] = None) -> pd.DataFrame:
         """Loads MRSTY.RRF which maps each concept to its semantic type(s)."""
         file_path = os.path.join(self.extracted_path, 'META', 'MRSTY.RRF')
-        return self._read_rrf(file_path, limit=limit, offset=offset)
+        return self._read_rrf(file_path, limit=limit, offset=offset, chunksize=chunksize)
 
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
         self._clear_database()
         self._create_constraints()
+        self._insert_entities()
         self._insert_concepts()
+        self._insert_entity_concept_relations()
 
     def _clear_database(self):
         print("Clearing database...")
@@ -142,22 +144,48 @@ class UmlsDataLoader(DataLoader):
         with self.driver.session() as session:
             session.run(query)
 
-    def _insert_concepts(self):
-        print("Inserting concepts...")
+    def _insert_entities(self):
+        print("Inserting entities...")
 
-        concepts_map = {}
+        entities_map = {}
         progress = 0
         columns = self.load_concepts(limit=1).columns.tolist()
         cui_index = columns.index('CUI')
         ispref_index = columns.index('ISPREF')
         str_index = columns.index('STR')
-        for df in self.load_concepts(chunksize=100_000):
-            for row in df.itertuples():
-                if row[cui_index] in concepts_map: continue
-                if row[ispref_index] == 'N': continue
+        for df in self.load_concepts(chunksize=1_000_000):
+            for row in df.itertuples(index=False):
+                cui = row[cui_index]
+                if cui in entities_map or row[ispref_index] == 'N':
+                    continue
+                entities_map[cui] = {
+                    'id': cui,
+                    'name': row[str_index]
+                }
+            progress += len(df)
+            print(f'Progress: {progress} rows')
+            
+        query = """
+        UNWIND $batch as item
+        MERGE (c:Entity:Base {id: item.id})
+        SET c.name = item.name
+        """
+        self._insert_batch(list(entities_map.values()), query)
+
+    def _insert_concepts(self):
+        print("Inserting concepts...")
+
+        concepts_map = {}
+        progress = 0
+        columns = self.load_semantic_types(limit=1).columns.tolist()
+        tui_index = columns.index('TUI')
+        sty_index = columns.index('STY')
+        for df in self.load_semantic_types(chunksize=1_000_000):
+            for row in df.itertuples(index=False):
+                if row[tui_index] in concepts_map: continue
                 concept = {}
-                concept['id'] = row[cui_index]
-                concept['name'] = row[str_index]
+                concept['id'] = row[tui_index]
+                concept['name'] = row[sty_index]
                 concepts_map[concept['id']] = concept
             progress += len(df)
             print(f'Progress: {progress} rows')
@@ -167,8 +195,46 @@ class UmlsDataLoader(DataLoader):
         MERGE (c:Concept:Base {id: item.id})
         SET c.name = item.name
         """
-        with self.driver.session() as session:
-            session.run(query, batch=concepts_map.values())
+        self._insert_batch(list(concepts_map.values()), query)
 
-def get_loader(driver: Driver, dataset_path: str) -> UmlsDataLoader:
+    def _insert_entity_concept_relations(self):
+        print("Inserting entity IS_A relations...")
+
+        relation_map = set()
+        progress = 0
+        columns = self.load_semantic_types(limit=1).columns.tolist()
+        cui_index = columns.index('CUI')
+        tui_index = columns.index('TUI')
+        for df in self.load_semantic_types(chunksize=1_000_000):
+            for row in df.itertuples(index=False): 
+                cui = row[cui_index]
+                tui = row[tui_index]
+                if (cui, tui) in relation_map: continue
+                relation_map.add((cui, tui))
+            progress += len(df)
+            print(f'Progress: {progress} rows')
+                
+        data = [{'child_id': cui, 'parent_id': tui} for cui, tui in relation_map]
+                
+        query = """
+        UNWIND $batch as item
+        MATCH (child:Base {id: item.child_id})
+        MATCH (parent:Base {id: item.parent_id})
+        MERGE (child)-[:IS_A]->(parent)
+        """
+        self._insert_batch(data, query)
+
+    def _insert_batch(self, data: list, query: str):
+        print(f"Starting to insert {len(data)} rows...")
+
+        chunksize = 100_000
+        progress = 0
+        for i in range(0, len(data), chunksize):
+            batch = data[i:i+chunksize]
+            with self.driver.session() as session:
+                session.run(query, batch=batch)
+            progress += len(batch)
+            print(f'Inserting: {progress} rows')
+
+def get_loader(driver: Driver, dataset_path: str = 'dataset/umls') -> UmlsDataLoader:
     return UmlsDataLoader(driver, dataset_path)
