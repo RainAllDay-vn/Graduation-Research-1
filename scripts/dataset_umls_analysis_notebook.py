@@ -436,8 +436,11 @@ def _(mo):
     ### Key Column Definitions:
     - **RT**: Record Type (`STY` for Semantic Type, `RL` for Relation).
     - **UI**: Unique Identifier (`T###` for types, `R###` for relations).
-    - **NAME**: The official label (e.g., "Disease or Syndrome").
-    - **TREE**: Hierarchy path (e.g., `A1.1.3` shows how types are nested).
+    - **STY/RL**: The official label (e.g., "Disease or Syndrome").
+    - **STN/RTN**: Hierarchy path (e.g., `A1.1.3` shows how types are nested).
+    - **DEF**: Definition text.
+    - **EX**: Examples of concepts in this category.
+    - **ABR**: Abbreviation.
     - **RIN**: The identifier of the Inverse Relation (only for `RL` records).
     """)
     return
@@ -466,7 +469,8 @@ def _(mo, srdef_df):
 def _(mo, srdef_df):
     def _get_hierarchy_analysis():
         semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
-        semantic_types_df['DEPTH'] = semantic_types_df['TREE'].str.count('\\.') + 1
+        # Use STN/RTN instead of TREE
+        semantic_types_df['DEPTH'] = semantic_types_df['STN/RTN'].str.count('\\.') + 1
         depth_stats = semantic_types_df['DEPTH'].value_counts().sort_index()
 
         md = mo.md(f"""
@@ -488,8 +492,8 @@ def _(mo, srdef_df):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ### 📖 Guide: Reading the Hierarchy Path (`TREE`)
-    The `TREE` field (also known as the Semantic Type Number or STN) uses a nested "breadcrumb" system. Each dot-separated segment represents a level of increasing specificity.
+    ### 📖 Guide: Reading the Hierarchy Path (`STN/RTN`)
+    The `STN/RTN` field (also known as the Semantic Type Number or STN) uses a nested "breadcrumb" system. Each dot-separated segment represents a level of increasing specificity.
 
     **Example: `B2.2.1.2.1` (Disease or Syndrome)**
 
@@ -515,11 +519,11 @@ def _(mo, srdef_df):
         sample_type = semantic_types_df[mask].iloc[0] if mask.any() else semantic_types_df.iloc[0]
 
         return mo.md(f"""
-        ### Sample entry: `{sample_type['NAME']}` ({sample_type['UI']})
-        - **Hierarchy Path (`TREE`)**: `{sample_type['TREE']}`
+        ### Sample entry: `{sample_type['STY/RL']}` ({sample_type['UI']})
+        - **Hierarchy Path (`STN/RTN`)**: `{sample_type['STN/RTN']}`
         - **Definition**: *{sample_type['DEF']}*
         - **Examples**: {sample_type['EX'] or "None listed."}
-        - **Abbreviation**: `{sample_type['AB']}`
+        - **Abbreviation**: `{sample_type['ABR']}`
         """)
 
     _get_semantic_type_deep_dive()
@@ -557,16 +561,17 @@ def _(mo, srdef_df):
 def _(mo, srdef_df):
     def _get_relation_registry():
         semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL']
-        relation_summary = semantic_relations_df[['UI', 'NAME', 'RIN', 'TREE', 'DEF']].sort_values(by='NAME')
+        # Use STY/RL instead of NAME and STN/RTN instead of TREE
+        relation_summary = semantic_relations_df[['UI', 'STY/RL', 'RIN', 'DEF']].sort_values(by='STY/RL').reset_index(drop=True)
 
         text = mo.md(f"""
         ### 🔗 Relation Registry & Inverse Mapping
-        Below is the complete list of defined relations and their respective inverses:
+        Below is some of the defined relations and their respective inverses:
         """)
 
         return mo.vstack([
             text,
-            relation_summary
+            relation_summary.head(10)
         ])
 
     _get_relation_registry()
@@ -577,13 +582,14 @@ def _(mo, srdef_df):
 def _(mo, srdef_df):
     def _get_symmetry_analysis():
         semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL']
-        symmetric = semantic_relations_df[semantic_relations_df['NAME'] == semantic_relations_df['RIN']]
-        asymmetric = semantic_relations_df[semantic_relations_df['NAME'] != semantic_relations_df['RIN']]
+        # Use STY/RL instead of NAME
+        symmetric = semantic_relations_df[semantic_relations_df['STY/RL'] == semantic_relations_df['RIN']]
+        asymmetric = semantic_relations_df[semantic_relations_df['STY/RL'] != semantic_relations_df['RIN']]
 
         return mo.md(f"""
         ### ⚖️ Symmetry Analysis
-        - **Symmetric Relations**: {len(symmetric)} (e.g., `{symmetric['NAME'].iloc[0] if not symmetric.empty else 'N/A'}`)
-        - **Asymmetric Relations**: {len(asymmetric)} (e.g., `{asymmetric['NAME'].iloc[0] if not asymmetric.empty else 'N/A'}` → `{asymmetric['RIN'].iloc[0] if not asymmetric.empty else 'N/A'}`)
+        - **Symmetric Relations**: {len(symmetric)} (e.g., `{symmetric['STY/RL'].iloc[0] if not symmetric.empty else 'N/A'}`)
+        - **Asymmetric Relations**: {len(asymmetric)} (e.g., `{asymmetric['STY/RL'].iloc[0] if not asymmetric.empty else 'N/A'}` → `{asymmetric['RIN'].iloc[0] if not asymmetric.empty else 'N/A'}`)
         """)
 
     _get_symmetry_analysis()
@@ -597,7 +603,8 @@ def _(mo, srdef_df):
         semantic_relations_df = srdef_df[srdef_df['RT'] == 'RL'].copy()
 
         # Calculate depth based on tree dots (e.g., 'R1.1.2' has 2 dots, depth 3)
-        semantic_relations_df['DEPTH'] = semantic_relations_df['TREE'].str.count('\\.') + 1
+        # Use STN/RTN instead of TREE
+        semantic_relations_df['DEPTH'] = semantic_relations_df['STN/RTN'].str.count('\\.') + 1
 
         # Summarize counts per depth level
         depth_counts = semantic_relations_df['DEPTH'].value_counts().sort_index().reset_index()
@@ -1008,6 +1015,194 @@ def _(mo, mrconso_df, mrdef_df):
         ])
 
     _get_cui_distribution()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 3.3 MRSTY.RRF (Semantic Types)
+
+    **MRSTY.RRF** maps every concept in the Metathesaurus to one or more **Semantic Types** from the Semantic Network. While MRCONSO tells us "what" concepts are called and MRDEF provides definitions, MRSTY tells us "what kind" of thing they are.
+
+    ### Why Explore this?
+    - **Scale**: With ~3.1 million rows, it's a substantial mapping file.
+    - **Purpose**: It provides the ontological categorization that enables semantic reasoning, filtering, and inference.
+    - **Analogy**: If MRCONSO is the dictionary and MRDEF is the definitions, then MRSTY is the **category system** that groups all terms into high-level domains like "Disease or Syndrome", "Pharmacologic Substance", "Therapeutic Procedure", etc.
+
+    ### Key Column Definitions:
+    - **CUI**: Concept Unique Identifier.
+    - **TUI**: Semantic Type Unique Identifier (e.g., T047).
+    - **STN**: Semantic Type Number (hierarchical path from SRDEF, e.g., B2.2.1.2.1).
+    - **STY**: Semantic Type label (e.g., "Disease or Syndrome").
+    - **ATUI**: Atom Unique Identifier (links to a specific term in MRCONSO).
+    - **CVF**: Content View Flag.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    mrsty_df = data_loader.load_semantic_types()
+    return (mrsty_df,)
+
+
+@app.cell
+def _(mo, mrsty_df):
+    def _get_scale_analysis():
+        total_rows = len(mrsty_df)
+        unique_cuis = mrsty_df['CUI'].nunique()
+        unique_tuis = mrsty_df['TUI'].nunique()
+        unique_stys = mrsty_df['STY'].nunique()
+
+        md = mo.md(f"""
+        ### 📊 MRSTY Scale Analysis
+        - **Total Records**: {total_rows:,}
+        - **Unique Concepts (CUIs)**: {unique_cuis:,}
+        - **Unique Semantic Types (STYs)**: {unique_stys:,}
+        - **Unique TUIs**: {unique_tuis:,}
+        - **Average Semantic Types per Concept**: {total_rows/unique_cuis:.2f}
+
+        #### Sample values:
+        """)
+
+        return mo.vstack([
+            md,
+            mrsty_df.head(10)
+        ])
+
+    _get_scale_analysis()
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mo, mrsty_df, srdef_df):
+    def _get_semantic_type_deep_dive():
+        # Get the TUI for the sample CUI
+        sample_sty_row = mrsty_df[mrsty_df['CUI'] == conso_sample_cui].iloc[0]
+        sample_tui = sample_sty_row['TUI']
+
+        # UI in SRDEF matches TUI in MRSTY
+        type_info = srdef_df[srdef_df['UI'] == sample_tui].iloc[0]
+        concept_count = (mrsty_df['TUI'] == sample_tui).sum()
+
+        return mo.md(f"""
+        #### Example entry: `{type_info['STY/RL']}` ({sample_tui})
+
+        - **Hierarchy Path (`STN/RTN`)**: `{type_info['STN/RTN']}`
+        - **Definition**: *{type_info['DEF']}*
+        - **Examples**: {type_info['EX'] or "None listed."}
+        - **Abbreviation**: `{type_info['ABR']}`
+        - **Number of Concepts in Metathesaurus**: {concept_count:,}
+        """)
+
+    _get_semantic_type_deep_dive()
+    return
+
+
+@app.cell
+def _(mo, mrsty_df):
+    def _get_semantic_type_distribution():
+        sty_counts = mrsty_df['STY'].value_counts().reset_index()
+        sty_counts.columns = ['Semantic Type', 'Concept Count']
+
+        md = mo.md(f"""
+        ### 📊 Semantic Type Distribution (Top 10)
+        The table below shows the 10 most common semantic types in the UMLS Metathesaurus:
+        """)
+
+        return mo.vstack([
+            md,
+            sty_counts.head(10)
+        ])
+
+    _get_semantic_type_distribution()
+    return
+
+
+@app.cell
+def _(mo, mrsty_df):
+    def _get_multiple_types_analysis():
+        type_counts = mrsty_df.groupby('CUI')['STY'].nunique()
+        single_type = (type_counts == 1).sum()
+        multiple_types = (type_counts > 1).sum()
+
+        # Find concepts with the most semantic types
+        max_types = type_counts.max()
+        multi_type_cuis = type_counts[type_counts == max_types].index.tolist()
+        sample_cui = multi_type_cuis[0] if multi_type_cuis else None
+
+        md = mo.md(f"""
+        ### 🎯 Multiple Semantic Types Analysis
+        - **Concepts with ONE semantic type**: {single_type:,} ({single_type/len(type_counts)*100:.1f}%)
+        - **Concepts with MULTIPLE semantic types**: {multiple_types:,} ({multiple_types/len(type_counts)*100:.1f}%)
+        - **Maximum semantic types per concept**: {max_types}
+        """)
+
+        if sample_cui:
+            sample_types = mrsty_df[mrsty_df['CUI'] == sample_cui][['STY', 'TUI']]
+            md2 = mo.md(f"""
+            ### 📋 Sample Concept with Multiple Types: `{sample_cui}`
+            This concept has **{max_types}** semantic types:
+            """)
+            return mo.vstack([md, md2, sample_types])
+
+        return md
+
+    _get_multiple_types_analysis()
+    return
+
+
+@app.cell
+def _(mo, mrsty_df, srdef_df):
+    def _get_hierarchy_coverage():
+        semantic_types_df = srdef_df[srdef_df['RT'] == 'STY']
+        total_types_in_srdef = len(semantic_types_df)
+
+        # Get unique TUIs from MRSTY
+        unique_tuis_in_mrsty = mrsty_df['TUI'].nunique()
+
+        # Find types defined in SRDEF but not used in MRSTY
+        unused_types = set(semantic_types_df['UI']) - set(mrsty_df['TUI'])
+
+        return mo.md(f"""
+        ### 🏛️ Hierarchy Coverage Analysis
+
+        The Semantic Network defines a comprehensive taxonomy of **{total_types_in_srdef}** semantic types. We have that:
+
+        - **Total Semantic Types Defined**: {total_types_in_srdef}
+        - **Types Used in MRSTY**: {unique_tuis_in_mrsty}
+        - **Unused Types**: {len(unused_types)}
+
+        This indicates that **{unique_tuis_in_mrsty/total_types_in_srdef*100:.1f}%** of all defined semantic types are actively used to categorize concepts in the current UMLS release.
+        """)
+
+    _get_hierarchy_coverage()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    # Section 3 Summary: Core Data Files Overview
+
+    The three core data files we've explored provide the foundation of the UMLS Metathesaurus:
+
+    | File | Primary Purpose | Key Insight |
+    | :--- | :--- | :--- |
+    | **MRCONSO.RRF** (3.1) | Concept Names & Sources | Maps every concept to all its names/synonyms across vocabularies. |
+    | **MRDEF.RRF** (3.2) | Definitions | Provides formal semantic definitions for concepts (where available). |
+    | **MRSTY.RRF** (3.3) | Semantic Types | Categorizes each concept into high-level ontological categories. |
+
+    ### The Semantic Hierarchy
+    These three files work together to create a rich semantic layer:
+
+    1. **Identity**: MRCONSO tells us "what is this concept called?"
+    2. **Meaning**: MRDEF tells us "what does this concept mean?"
+    3. **Category**: MRSTY tells us "what kind of thing is this?"
+
+    This triad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
+    """)
     return
 
 

@@ -41,8 +41,10 @@ class UmlsDataLoader(DataLoader):
         """Infer column names from MRFILES.RRF catalog."""
         try:
             df_files = self.load_file_definitions()
+            df_relations = self.load_semantic_network_files()
+            df = pd.concat([df_files, df_relations], ignore_index=True)
             filename = os.path.basename(file_path)
-            file_info = df_files[df_files['FIL'] == filename]
+            file_info = df[df['FIL'] == filename]
             if not file_info.empty:
                 fmt = file_info.iloc[0]['FMT']
                 if fmt and isinstance(fmt, str):
@@ -80,13 +82,13 @@ class UmlsDataLoader(DataLoader):
     def load_semantic_network_files(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads SRFIL which identifies all files in the Semantic Network (NET directory)."""
         file_path = os.path.join(self.extracted_path, 'NET', 'SRFIL')
-        return self._read_rrf(file_path, limit=limit, offset=offset)
+        columns = ['FIL', 'DES', 'FMT', 'CLS', 'RTY', 'SZY']
+        return self._read_rrf(file_path, columns=columns, limit=limit, offset=offset)
 
     def load_semantic_network_fields(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads SRFLD which contains field descriptions for the Semantic Network (NET directory)."""
         file_path = os.path.join(self.extracted_path, 'NET', 'SRFLD')
         return self._read_rrf(file_path, limit=limit, offset=offset)
-
 
     def load_semantic_network_definitions(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads SRDEF which contains the definitions of Semantic Types and Relations (NET directory)."""
@@ -101,6 +103,11 @@ class UmlsDataLoader(DataLoader):
     def load_concept_definitions(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads MRDEF.RRF which contains semantic definitions for concepts."""
         file_path = os.path.join(self.extracted_path, 'META', 'MRDEF.RRF')
+        return self._read_rrf(file_path, limit=limit, offset=offset)
+
+    def load_semantic_types(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRSTY.RRF which maps each concept to its semantic type(s)."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRSTY.RRF')
         return self._read_rrf(file_path, limit=limit, offset=offset)
 
     def load(self):
