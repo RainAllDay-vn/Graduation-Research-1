@@ -1297,6 +1297,115 @@ def _(conso_sample_cui, mo, mrsat_df):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## 3.5 MRHIER.RRF (Hierarchies)
+
+    **MRHIER.RRF** contains computable hierarchies for concepts in the Metathesaurus. It explicitly represents the parent-child relationships and provides the full path to the root for each concept within a specific source.
+
+    ### Key Column Definitions:
+    - **CUI**: Concept Unique Identifier.
+    - **AUI**: Atom Unique Identifier.
+    - **CXN**: Context Number (distinguishes multiple locations in a hierarchy).
+    - **PAUI**: Parent Atom Unique Identifier.
+    - **SAB**: Source Abbreviation.
+    - **RELA**: Relationship Label (e.g., `isa`, `part_of`).
+    - **PTR**: Path to Root (a dot-separated list of AUIs from the root down to the parent).
+    - **HCD**: Hierarchy Code.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    # MRHIER is large (~21M rows), loading a sample
+    mrhier_df = data_loader.load_hierarchies(limit=1_000_000)
+    return (mrhier_df,)
+
+
+@app.cell
+def _(mo, mrhier_df):
+    def _get_mrhier_scale_analysis():
+        _total_rows = len(mrhier_df)
+        _unique_cuis = mrhier_df['CUI'].nunique()
+        _unique_sabs = mrhier_df['SAB'].nunique()
+
+        return mo.md(f"""
+        ### 📊 MRHIER Sample Analysis (First 1M rows)
+        - **Total Records in Sample**: {_total_rows:,}
+        - **Unique Concepts (CUIs)**: {_unique_cuis:,}
+        - **Unique Sources (SAB)**: {_unique_sabs:,}
+
+        #### Sample Rows:
+        """)
+
+    _get_mrhier_scale_analysis()
+    return
+
+
+@app.cell
+def _(mrhier_df):
+    mrhier_df.head(10)
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mo, mrhier_df):
+    def _get_hierarchy_interpretation():
+        # Try to find the sample CUI, otherwise take the first row
+        _mask = mrhier_df['CUI'] == conso_sample_cui
+        _sample_row = mrhier_df[_mask].iloc[0] if _mask.any() else mrhier_df.iloc[0]
+
+        return mo.md(f"""
+        ### 🔍 Hierarchy Entry Interpretation: `{_sample_row['CUI']}`
+        - **Source (`SAB`)**: `{_sample_row['SAB']}`
+        - **Parent Atom (`PAUI`)**: `{_sample_row['PAUI'] or 'ROOT'}`
+        - **Relationship (`RELA`)**: `{_sample_row['RELA'] or 'N/A'}`
+        - **Path to Root (`PTR`)**: `{_sample_row['PTR'] or 'N/A'}`
+        
+        **What this tells us:**
+        The `PTR` field is particularly powerful for graph traversal as it encodes the entire lineage of the concept within the source hierarchy without needing recursive joins.
+        """)
+
+    _get_hierarchy_interpretation()
+    return
+
+
+@app.cell
+def _(mo, mrhier_df):
+    def _get_depth_analysis():
+        # Calculate depth based on the number of dots in the PTR (Path To Root)
+        # PTR is AUI1.AUI2.AUI3...
+        _depths = mrhier_df['PTR'].str.split('.').str.len().fillna(0)
+        _depth_counts = _depths.value_counts().sort_index().reset_index()
+        _depth_counts.columns = ['Hierarchy Depth', 'Count']
+
+        return mo.vstack([
+            mo.md("### 🌳 Hierarchy Depth Analysis"),
+            mo.md("Distribution of concepts by their depth in the source hierarchy:"),
+            _depth_counts
+        ])
+
+    _get_depth_analysis()
+    return
+
+
+@app.cell
+def _(mo, mrhier_df):
+    def _get_rela_distribution():
+        _rela_counts = mrhier_df['RELA'].value_counts().reset_index()
+        _rela_counts.columns = ['Relationship Label (RELA)', 'Count']
+
+        return mo.vstack([
+            mo.md("### 🔗 Relationship Types in Hierarchies"),
+            _rela_counts
+        ])
+
+    _get_rela_distribution()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     # Section 3 Summary: Core Data Files Overview
 
     The three core data files we've explored provide the foundation of the UMLS Metathesaurus:
@@ -1307,16 +1416,18 @@ def _(mo):
     | **MRDEF.RRF** (3.2) | Definitions | Provides formal semantic definitions for concepts (where available). |
     | **MRSTY.RRF** (3.3) | Semantic Types | Categorizes each concept into high-level ontological categories. |
     | **MRSAT.RRF** (3.4) | Attributes | Catch-all for specialized source-specific metadata (flags, IDs, tags). |
+    | **MRHIER.RRF** (3.5) | Hierarchies | Explicit parent-child paths and full lineage (PTR). |
 
     ### The Semantic Hierarchy
-    These four files work together to create a rich semantic layer:
+    These five files work together to create a rich semantic layer:
 
     1. **Identity**: MRCONSO tells us "what is this concept called?"
     2. **Meaning**: MRDEF tells us "what does this concept mean?"
     3. **Category**: MRSTY tells us "what kind of thing is this?"
     4. **Extensibility**: MRSAT tells us "what else do we know about this from specific sources?"
+    5. **Lineage**: MRHIER tells us "where does this concept fit in the tree?"
 
-    This quadriad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
+    This pentad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
     """)
     return
 

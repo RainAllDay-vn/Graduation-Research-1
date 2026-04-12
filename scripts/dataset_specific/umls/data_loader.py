@@ -1,5 +1,7 @@
+from utils import to_screaming_snake_case
 import os
 import pandas as pd
+import numpy as np
 from typing import Optional, List
 from neo4j import Driver
 from models import DataLoader
@@ -23,16 +25,22 @@ class UmlsDataLoader(DataLoader):
         if columns is None:
             columns = self._infer_columns(file_path)
 
+        actual_columns = list(columns) + [''] if columns else None
+        usecols = columns if columns else None
+
         df = pd.read_csv(
             file_path, 
             sep='|', 
-            names=columns, 
+            names=actual_columns, 
+            usecols=usecols,
             index_col=False, 
             low_memory=False,
             skiprows=offset if offset else 0,
             nrows=limit if limit else None,
             chunksize=chunksize if chunksize else None,
-            dtype=str
+            dtype=str,
+            na_filter=False,
+            keep_default_na=False
         )
         
         return df
@@ -115,13 +123,21 @@ class UmlsDataLoader(DataLoader):
         file_path = os.path.join(self.extracted_path, 'META', 'MRSTY.RRF')
         return self._read_rrf(file_path, limit=limit, offset=offset, chunksize=chunksize)
 
+    def load_hierarchies(self, limit: Optional[int] = None, offset: Optional[int] = None, chunksize: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRHIER.RRF which contains computable hierarchies."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRHIER.RRF')
+        return self._read_rrf(file_path, limit=limit, offset=offset, chunksize=chunksize)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
+        aui_to_cui_map = {}
+
         self._clear_database()
         self._create_constraints()
-        self._insert_entities()
+        self._insert_entities(aui_to_cui_map)
         self._insert_concepts()
         self._insert_entity_concept_relations()
+        self._insert_entity_to_entity_relations(aui_to_cui_map)
 
     def _clear_database(self):
         print("Clearing database...")
@@ -144,20 +160,23 @@ class UmlsDataLoader(DataLoader):
         with self.driver.session() as session:
             session.run(query)
 
-    def _insert_entities(self):
+    def _insert_entities(self, aui_to_cui_map: dict):
         print("Inserting entities...")
 
         entities_map = {}
         progress = 0
         columns = self.load_concepts(limit=1).columns.tolist()
         cui_index = columns.index('CUI')
+        aui_index = columns.index('AUI')
         ispref_index = columns.index('ISPREF')
         str_index = columns.index('STR')
         for df in self.load_concepts(chunksize=1_000_000):
             for row in df.itertuples(index=False):
                 cui = row[cui_index]
+                aui = row[aui_index]
                 if cui in entities_map or row[ispref_index] == 'N':
                     continue
+                aui_to_cui_map[aui] = cui
                 entities_map[cui] = {
                     'id': cui,
                     'name': row[str_index]
@@ -235,6 +254,47 @@ class UmlsDataLoader(DataLoader):
                 session.run(query, batch=batch)
             progress += len(batch)
             print(f'Inserting: {progress} rows')
+
+    def _insert_entity_to_entity_relations(self, aui_to_cui_map: dict):
+        print("Inserting entity-to-entity relationships...")
+
+        relation_map = set()
+        progress = 0
+        columns = self.load_hierarchies(limit=1).columns.tolist()
+        aui_index = columns.index('AUI')
+        paui_index = columns.index('PAUI')
+        rela_index = columns.index('RELA')
+        for df in self.load_hierarchies(chunksize=1_000_000):
+            for row in df.itertuples(index=False): 
+                aui = row[aui_index]
+                paui = row[paui_index]
+                if aui not in aui_to_cui_map or paui not in aui_to_cui_map: continue
+                cui = aui_to_cui_map[aui]
+                pcui = aui_to_cui_map[paui]
+
+                rela_val = str(row[rela_index]).strip()
+                rela = to_screaming_snake_case(rela_val) if rela_val and rela_val != 'nan' else 'ISA'
+                if rela == 'ISA': rela = 'IS_A'
+
+                if (cui, pcui, rela) in relation_map: continue
+                relation_map.add((cui, pcui, rela))
+            progress += len(df)
+            print(f'Progress: {progress} rows')
+                
+        data_by_rela = {}
+        for cui, pcui, rela in relation_map:
+            if rela not in data_by_rela:
+                data_by_rela[rela] = []
+            data_by_rela[rela].append({'child_id': cui, 'parent_id': pcui})
+                
+        for rela, batch_data in data_by_rela.items():
+            query = f"""
+            UNWIND $batch as item
+            MATCH (child:Base {{id: item.child_id}})
+            MATCH (parent:Base {{id: item.parent_id}})
+            MERGE (child)-[:{rela}]->(parent)
+            """
+            self._insert_batch(batch_data, query)
 
 def get_loader(driver: Driver, dataset_path: str = 'dataset/umls') -> UmlsDataLoader:
     return UmlsDataLoader(driver, dataset_path)
