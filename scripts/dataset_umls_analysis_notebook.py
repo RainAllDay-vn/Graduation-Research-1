@@ -674,7 +674,8 @@ def _(mo):
 
 
 @app.cell
-def _(mo, mrconso_df):
+def _(data_loader, mo):
+    mrconso_df = data_loader.load_concepts(limit=1_000_000)
     def _get_mrconso_scale_analysis():
         total_rows = len(mrconso_df)
         unique_cuis = mrconso_df['CUI'].nunique()
@@ -694,7 +695,7 @@ def _(mo, mrconso_df):
         """)
 
     _get_mrconso_scale_analysis()
-    return
+    return (mrconso_df,)
 
 
 @app.cell
@@ -1184,6 +1185,118 @@ def _(mo, mrsty_df, srdef_df):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## 3.4 MRSAT.RRF (Attributes)
+
+    **MRSAT.RRF** contains additional attributes for concepts, terms, and strings. This file is the "catch-all" for metadata that is too specific or diverse to fit into the fixed columns of other files like `MRCONSO` or `MRSTY`.
+
+    ### Key Column Definitions:
+    - **CUI**: Concept Unique Identifier.
+    - **STYPE**: The type of object the attribute is attached to (e.g., `CUI`, `AUI`, `CODE`).
+    - **ATN**: Attribute Name (e.g., `DEFINITION`, `SEMANTIC_TYPE`).
+    - **ATV**: Attribute Value (the actual data).
+    - **SAB**: Source Abbreviation.
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    # MRSAT is very large (~50M rows), so we load a representative sample for analysis
+    mrsat_df = data_loader.load_attributes(limit=1_000_000)
+    return (mrsat_df,)
+
+
+@app.cell
+def _(mo, mrsat_df):
+    def _get_mrsat_scale_analysis():
+        _total_rows = len(mrsat_df)
+        _unique_cuis = mrsat_df['CUI'].nunique()
+        _unique_atns = mrsat_df['ATN'].nunique()
+
+        return mo.md(f"""
+        ### 📊 MRSAT Sample Analysis (First 100k rows)
+        - **Total Records in Sample**: {_total_rows:,}
+        - **Unique Concepts (CUIs)**: {_unique_cuis:,}
+        - **Unique Attribute Names (ATN)**: {_unique_atns:,}
+
+        #### Sample Rows:
+        """)
+
+    _get_mrsat_scale_analysis()
+    return
+
+
+@app.cell
+def _(mrsat_df):
+    mrsat_df.head(10)
+    return
+
+
+@app.cell
+def _(mo, mrdoc_df, mrsat_df):
+    def _get_attachment_level_analysis():
+        _stype_counts = mrsat_df['STYPE'].value_counts().reset_index()
+        _stype_counts.columns = ['STYPE', 'Count']
+
+        # Join with MRDOC to get expanded names
+        _stype_labels = mrdoc_df[mrdoc_df['DOCKEY'] == 'STYPE'][['VALUE', 'EXPL']].rename(columns={'VALUE': 'STYPE', 'EXPL': 'Description'})
+        _stype_analysis = _stype_counts.merge(_stype_labels, on='STYPE', how='left')
+        _stype_analysis = _stype_analysis.rename(columns={'STYPE': 'Attachment Level (STYPE)'})
+
+        return mo.vstack([
+            mo.md(f"""
+            ### 🎯 Attachment Level Analysis (`STYPE`)
+            Attributes in `MRSAT` can be attached to different levels of the UMLS hierarchy:
+            """),
+            _stype_analysis
+        ])
+
+    _get_attachment_level_analysis()
+    return
+
+
+@app.cell
+def _(mo, mrdoc_df, mrsat_df):
+    def _get_attribute_name_distribution():
+        _atn_counts = mrsat_df['ATN'].value_counts().head(15).reset_index()
+        _atn_counts.columns = ['ATN', 'Count']
+
+        # Join with MRDOC to get expanded names
+        _atn_labels = mrdoc_df[mrdoc_df['DOCKEY'] == 'ATN'][['VALUE', 'EXPL']].rename(columns={'VALUE': 'ATN', 'EXPL': 'Description'})
+        _atn_analysis = _atn_counts.merge(_atn_labels, on='ATN', how='left')
+
+        return mo.vstack([
+            mo.md(f"""
+            ### 📈 Top 15 Attribute Names (`ATN`)
+            Attributes often represent source-specific identifiers, flags, or specialized medical metadata.
+            """),
+            _atn_analysis
+        ])
+
+    _get_attribute_name_distribution()
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mo, mrsat_df):
+    def _get_concept_attributes_deep_dive():
+        _sample_attrs = mrsat_df[mrsat_df['CUI'] == conso_sample_cui]
+
+        if _sample_attrs.empty:
+            return mo.md(f"No attributes found for CUI `{conso_sample_cui}` in the current 100k sample.")
+
+        return mo.vstack([
+            mo.md(f"### 🔍 Concept Attributes Deep Dive: `{conso_sample_cui}`"),
+            _sample_attrs[['STYPE', 'ATN', 'ATV', 'SAB']]
+        ])
+
+    _get_concept_attributes_deep_dive()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     # Section 3 Summary: Core Data Files Overview
 
     The three core data files we've explored provide the foundation of the UMLS Metathesaurus:
@@ -1193,15 +1306,17 @@ def _(mo):
     | **MRCONSO.RRF** (3.1) | Concept Names & Sources | Maps every concept to all its names/synonyms across vocabularies. |
     | **MRDEF.RRF** (3.2) | Definitions | Provides formal semantic definitions for concepts (where available). |
     | **MRSTY.RRF** (3.3) | Semantic Types | Categorizes each concept into high-level ontological categories. |
+    | **MRSAT.RRF** (3.4) | Attributes | Catch-all for specialized source-specific metadata (flags, IDs, tags). |
 
     ### The Semantic Hierarchy
-    These three files work together to create a rich semantic layer:
+    These four files work together to create a rich semantic layer:
 
     1. **Identity**: MRCONSO tells us "what is this concept called?"
     2. **Meaning**: MRDEF tells us "what does this concept mean?"
     3. **Category**: MRSTY tells us "what kind of thing is this?"
+    4. **Extensibility**: MRSAT tells us "what else do we know about this from specific sources?"
 
-    This triad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
+    This quadriad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
     """)
     return
 

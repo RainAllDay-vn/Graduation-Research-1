@@ -105,6 +105,11 @@ class UmlsDataLoader(DataLoader):
         file_path = os.path.join(self.extracted_path, 'META', 'MRDEF.RRF')
         return self._read_rrf(file_path, limit=limit, offset=offset)
 
+    def load_attributes(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
+        """Loads MRSAT.RRF which contains concept, term, and string attributes."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRSAT.RRF')
+        return self._read_rrf(file_path, limit=limit, offset=offset)
+
     def load_semantic_types(self, limit: Optional[int] = None, offset: Optional[int] = None) -> pd.DataFrame:
         """Loads MRSTY.RRF which maps each concept to its semantic type(s)."""
         file_path = os.path.join(self.extracted_path, 'META', 'MRSTY.RRF')
