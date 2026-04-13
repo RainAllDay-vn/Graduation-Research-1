@@ -6,13 +6,13 @@ app = marimo.App()
 
 @app.cell
 def _():
-    import json
     import os
-    import marimo as mo
     import re
+    import marimo as mo
+    import pandas as pd
     from model_evaluator import ModelEvaluator
 
-    return ModelEvaluator, json, mo, re
+    return ModelEvaluator, mo, pd, re
 
 
 @app.cell
@@ -32,40 +32,19 @@ def _(mo):
 
 
 @app.cell
-def _(json):
-    dataset_path = "dataset/mini/train.json"
-
-    with open(dataset_path, "r", encoding="utf-8") as f:
-        mini_dataset = json.load(f)
-    return (mini_dataset,)
+def _(pd):
+    dataset_path = "dataset/medquad/data.parquet"
+    evaluation_df = pd.read_parquet(dataset_path).sample(100, random_state=42)[['question', 'answer']]
+    evaluation_df.head(10)
+    return
 
 
 @app.cell
-def _(ModelEvaluator, mini_dataset):
-    # Extract questions for filtering
-    _questions = [entry.get("question", entry.get("utterance", "")) for entry in mini_dataset]
-
+def _(ModelEvaluator):
     evaluator = ModelEvaluator(
         model_name="Qwen/Qwen3.5-4B", 
         api_key=""
     )
-
-    # Fetch baseline responses from the teacher model (Qwen/Qwen3.5-4B with reasoning)
-    baseline_df = evaluator.fetch_cached_responses(
-        model_name="Qwen/Qwen3.5-4B",
-        dataset_name="lc-quad-2.0",
-        include_reasoning=1,
-        questions = _questions
-    )
-    return (baseline_df,)
-
-
-@app.cell
-def _(baseline_df, mini_dataset, mo):
-    mo.md(f"""
-    Loaded **{len(mini_dataset)}** entries from the mini dataset.
-    Found **{len(baseline_df)}** cached baseline responses.
-    """)
     return
 
 
@@ -136,12 +115,12 @@ def _(mo):
         "LIMIT",
     ]
 
-    def _get_structured_query_prompt_snippet():
+    def get_structured_query_prompt_snippet():
         order_str = " -> ".join(CANONICAL_CYPHER_ORDER)
-        return mo.md(f"CRITICAL: Always follow the standard Cypher clause order: `{order_str}`. Do not skip to RETURN before MATCHing patterns.")
+        return mo.md(f"CRITICAL: Always follow the standard Cypher clause order: `{order_str}`. Do not skip to RETURN before MATCHING patterns.")
 
-    _get_structured_query_prompt_snippet()
-    return
+    get_structured_query_prompt_snippet()
+    return (get_structured_query_prompt_snippet,)
 
 
 @app.cell
@@ -195,6 +174,95 @@ def _(mo, re):
         {mo.as_html(_parsed) if _parsed else "❌ Failed to parse"}
         """
     )
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Approach 1: Zero-Shot Strict Guidance
+
+    In this approach, we provide explicit rules dictating the structure to the model without giving examples. We define exactly what is allowed and what is forbidden.
+    """)
+    return
+
+
+@app.cell
+def _(get_structured_query_prompt_snippet, mo):
+    # Base Zero-Shot Prompt Template
+    ZERO_SHOT_PROMPT_TEMPLATE = f"""You are a strict Cypher query generator for a read-only Question Answering system.
+    Your task is to convert the given natural language question into a Cypher query.
+
+    {get_structured_query_prompt_snippet()}
+
+    Additional Constraints:
+    1. DO NOT use these clauses: WITH, UNWIND, CREATE, MERGE, SET, DELETE.
+    2. Separate your reasoning from the final query.
+    3. Wrap your final, executable Cypher query inside `<cypher>` and `</cypher>` tags.
+
+    Question: {{question}}
+    """
+
+    mo.md(f'''
+    ```
+    {ZERO_SHOT_PROMPT_TEMPLATE}
+    ```
+    ''')
+    return (ZERO_SHOT_PROMPT_TEMPLATE,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Approach 2: Few-Shot Demonstrations
+
+    Here, we reinforce the strict structure by providing a few concrete examples showing the exact input -> reasoning -> `<cypher>` output pipeline we expect.
+    """)
+    return
+
+
+@app.cell
+def _(ZERO_SHOT_PROMPT_TEMPLATE, mo):
+    # Few-Shot Demonstrations (extending the Zero Shot template)
+    FEW_SHOT_PROMPT_TEMPLATE = ZERO_SHOT_PROMPT_TEMPLATE + """
+    ---
+    EXAMPLES:
+
+    Question: What is a symptom of asthma?
+    Reasoning: I need to match the Disease node representing "asthma", find diseases that have a symptom relationship to a Symptom node, and return the symptom name.
+    <cypher>
+    MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+    WHERE d.name = 'asthma'
+    RETURN s.name
+    </cypher>
+
+    Question: List 5 diseases associated with a cough, ordered alphabetically.
+    Reasoning: I need to match a Symptom node named 'cough', traverse back to Disease nodes via the HAS_SYMPTOM relationship, return the disease names, order them alphabetically, and limit the result to 5.
+    <cypher>
+    MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+    WHERE s.name = 'cough'
+    RETURN d.name
+    ORDER BY d.name
+    LIMIT 5
+    </cypher>
+    ---
+
+    Question: {{question}}
+    """
+
+    mo.md(f'''
+    ```
+    {FEW_SHOT_PROMPT_TEMPLATE}
+    ```
+    ''')
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Running the Evaluation
+    """)
     return
 
 
