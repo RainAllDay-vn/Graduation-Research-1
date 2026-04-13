@@ -27,8 +27,20 @@ class UmlsDataLoader(DataLoader):
         if schema is None:
             schema = self._infer_columns(file_path)
 
-        actual_columns = list(schema) + [''] if schema else None
-        usecols = columns if columns else (schema if schema else None)
+        if schema:
+            new_schema = []
+            for i, col in enumerate(schema):
+                if schema.count(col) > 1:
+                    occurrence = schema[:i+1].count(col)
+                    suffix = f"{occurrence}" if col == "STY/RL" else f"_{occurrence-1}"
+                    new_schema.append(f"{col}{suffix}")
+                else:
+                    new_schema.append(col)
+            actual_columns = new_schema + ['']
+        else:
+            actual_columns = None
+
+        usecols = columns if columns else (new_schema if schema else None)
 
         parquet_path = f"{file_path}.parquet"
         file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -145,6 +157,11 @@ class UmlsDataLoader(DataLoader):
     def load_semantic_network_definitions(self, limit: Optional[int] = None, offset: Optional[int] = None, columns: Optional[List[str]] = None) -> pd.DataFrame:
         """Loads SRDEF which contains the definitions of Semantic Types and Relations (NET directory)."""
         file_path = os.path.join(self.extracted_path, 'NET', 'SRDEF')
+        return self._read_rrf(file_path, columns=columns, limit=limit, offset=offset)
+
+    def load_semantic_network_relation_structure(self, limit: Optional[int] = None, offset: Optional[int] = None, columns: Optional[List[str]] = None) -> pd.DataFrame:
+        """Loads SRSTR which contains the structure of the Semantic Network (allowed relationships between types)."""
+        file_path = os.path.join(self.extracted_path, 'NET', 'SRSTR')
         return self._read_rrf(file_path, columns=columns, limit=limit, offset=offset)
 
     def load_concepts(self, limit: Optional[int] = None, offset: Optional[int] = None, chunksize: Optional[int] = None, columns: Optional[List[str]] = None) -> pd.DataFrame:
