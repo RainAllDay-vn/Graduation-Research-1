@@ -12,9 +12,8 @@
 
 ## 2. Ontology & KG Engineering
 - [ ] **Ontology Design**: Defining classes (`Disease`, `Symptom`, `Drug`) and relationships (`treatedBy`, `causes`). 
-- [ ] **Data Ingestion**: Developing scripts to load datasets (e.g., KQA Pro) into Neo4j. 
-- [ ] **Medical Ontology refinement**: Integrating standard medical ontologies (UMLS, SNOMED CT) or refining custom schemas. 
-- [ ] **Constraints & Reasoning**: Implementing schema constraints in Neo4j to ensure data integrity. 
+- [x] **Data Ingestion**: Developing scripts to load datasets (e.g., KQA Pro) into Neo4j. 
+- [x] **Constraints & Reasoning**: Implementing schema constraints in Neo4j to ensure data integrity. 
 
 ## 3. Teacher Pipeline (Gold Standard)
 - [ ] **Semantic Parsing**: Using large LLMs (GPT-4/Gemini) to convert natural language to Cypher. 
