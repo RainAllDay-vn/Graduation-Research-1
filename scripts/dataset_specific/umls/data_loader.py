@@ -188,16 +188,30 @@ class UmlsDataLoader(DataLoader):
 
     def _clear_database(self):
         print("Clearing database...")
-        # Clear data
-        cleanup_query = """
+        
+        # 1. Clear relationships in batches
+        print("Clearing relationships...")
+        rel_cleanup_query = """
         CALL apoc.periodic.iterate(
-        "MATCH (n) RETURN n",
-        "DETACH DELETE n",
-        {batchSize: 2000, parallel: false}
+        "MATCH ()-[r]->() RETURN r",
+        "DELETE r",
+        {batchSize: 5000, parallel: false}
         )
         """
+        
+        # 2. Clear nodes in batches
+        print("Clearing nodes...")
+        node_cleanup_query = """
+        CALL apoc.periodic.iterate(
+        "MATCH (n) RETURN n",
+        "DELETE n",
+        {batchSize: 5000, parallel: false}
+        )
+        """
+        
         with self.driver.session() as session:
-            session.run(cleanup_query).consume()
+            session.run(rel_cleanup_query).consume()
+            session.run(node_cleanup_query).consume()
 
         # Clear schema (constraints and indexes)
         cleanup_query = "CALL apoc.schema.assert({}, {})"
