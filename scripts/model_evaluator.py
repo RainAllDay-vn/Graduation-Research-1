@@ -75,6 +75,11 @@ class ModelEvaluator:
                     "question": "TEXT",
                     "include_reasoning": "INTEGER",
                     "response_text": "TEXT",
+                    "token_1": "TEXT",
+                    "token_2": "TEXT",
+                    "token_3": "TEXT",
+                    "token_4": "TEXT",
+                    "token_5": "TEXT",
                     "logprob_1": "REAL",
                     "logprob_2": "REAL",
                     "logprob_3": "REAL",
@@ -149,12 +154,14 @@ class ModelEvaluator:
                 
                 # Safely extract top 5 logprobs if available
                 lps = [None] * 5
+                tokens = [None] * 5
                 try:
                     if self.logprobs and hasattr(choice, "logprobs") and choice.logprobs:
                         if hasattr(choice.logprobs, "content") and choice.logprobs.content:
                             for i, lp_info in enumerate(choice.logprobs.content[:self.top_logprobs]):
                                 if i < 5:
                                     lps[i] = lp_info.get("logprob") if isinstance(lp_info, dict) else getattr(lp_info, "logprob", None)
+                                    tokens[i] = lp_info.get("token") if isinstance(lp_info, dict) else getattr(lp_info, "token", None)
                 except Exception as e:
                     logger.debug(f"Could not extract logprobs: {e}")
                     
@@ -162,10 +169,12 @@ class ModelEvaluator:
                     """
                     INSERT OR REPLACE INTO requests 
                     (model_name, system_prompt_id, question, include_reasoning, response_text, 
+                     token_1, token_2, token_3, token_4, token_5,
                      logprob_1, logprob_2, logprob_3, logprob_4, logprob_5, context_length_exceeded)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text,
+                     tokens[0], tokens[1], tokens[2], tokens[3], tokens[4],
                      lps[0], lps[1], lps[2], lps[3], lps[4], context_length_exceeded)
                 )
                 conn.commit()
@@ -184,7 +193,7 @@ class ModelEvaluator:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT response_text, context_length_exceeded, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT response_text, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
                     FROM requests 
                     WHERE model_name=? AND system_prompt_id=? AND question=? AND include_reasoning=?
                     """,
@@ -214,7 +223,7 @@ class ModelEvaluator:
                 
                 placeholders = ','.join(['?'] * len(questions))
                 query = f"""
-                    SELECT model_name, question, response_text, context_length_exceeded, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT model_name, question, response_text, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
                     FROM requests 
                     WHERE system_prompt_id=? AND include_reasoning=? AND question IN ({placeholders})
                 """
