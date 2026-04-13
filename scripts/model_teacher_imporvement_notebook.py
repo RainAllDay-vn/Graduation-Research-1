@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.0"
+__generated_with = "0.23.1"
 app = marimo.App()
 
 
@@ -9,9 +9,10 @@ def _():
     import json
     import os
     import marimo as mo
+    import re
     from model_evaluator import ModelEvaluator
 
-    return ModelEvaluator, json, mo
+    return ModelEvaluator, json, mo, re
 
 
 @app.cell
@@ -32,7 +33,7 @@ def _(mo):
 
 @app.cell
 def _(json):
-    dataset_path = r"d:\Graduation-Research-1\dataset\mini\train.json"
+    dataset_path = "dataset/mini/train.json"
 
     with open(dataset_path, "r", encoding="utf-8") as f:
         mini_dataset = json.load(f)
@@ -95,41 +96,36 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ## 1. Structured Query Generation
+    mo.md(r"""
+    ## 1. Structured Query Generation
 
-        Generating graph queries like Cypher requires high precision. Even small deviations in syntax or structure can lead to execution failures. Structured Query Generation aims to enforce a strict format on the model's output to ensure it is consistently parseable and syntactically correct.
+    Generating graph queries like Cypher requires high precision. Even small deviations in syntax or structure can lead to execution failures. Structured Query Generation aims to enforce a strict format on the model's output to ensure it is consistently parseable and syntactically correct.
 
-        ### Why Structure Matters
-        When we use LLMs as "Teacher Models" to generate synthetic data or fine-tuning targets, we need to guarantee that the output can be automatically processed. By enforcing structure, we:
-        - **Decrease Parsing Errors**: Eliminating the need for complex regex or manual cleaning.
-        - **Improve Query Validity**: Constraining the model to follow specific Cypher patterns (e.g., proper `MATCH` ... `RETURN` flow).
-        - **Standardize Metadata**: Ensuring that reasoning steps and final queries are clearly separated.
+    ### Why Structure Matters
+    When we use LLMs as "Teacher Models" to generate synthetic data or fine-tuning targets, we need to guarantee that the output can be automatically processed. By enforcing structure, we:
+    - **Decrease Parsing Errors**: Eliminating the need for complex regex or manual cleaning.
+    - **Improve Query Validity**: Constraining the model to follow specific Cypher patterns (e.g., proper `MATCH` ... `RETURN` flow).
 
-        In this section, we will define a structured prompt template and evaluate how well the model adheres to these constraints compared to our baseline.
-        """
-    )
+    In this section, we will define a structured prompt template and evaluate how well the model adheres to these constraints compared to our baseline.
+    """)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-        ### Defining the Canonical Cypher Structure
-        To ensure the model produces predictable and valid Cypher queries for our **Q&A system**, we enforce a strict read-only sequence. This prevents the model from generating write operations and ensures maximum parseability:
-        1.  **READ**: `MATCH` or `OPTIONAL MATCH`
-        2.  **FILTER**: `WHERE` (immediately following the MATCH)
-        3.  **RETURN**: `RETURN`
-        4.  **POST-PROCESS**: `ORDER BY` or `LIMIT`
-        """
-    )
+    mo.md(r"""
+    ### Defining the Canonical Cypher Structure
+    To ensure the model produces predictable and valid Cypher queries for our **Q&A system**, we enforce a strict read-only sequence. This prevents the model from generating write operations and ensures maximum parseability:
+    1.  **READ**: `MATCH` or `OPTIONAL MATCH`
+    2.  **FILTER**: `WHERE` (immediately following the MATCH)
+    3.  **RETURN**: `RETURN`
+    4.  **POST-PROCESS**: `ORDER BY` or `LIMIT`
+    """)
     return
 
 
 @app.cell
-def _():
+def _(mo):
     # Canonical order of Cypher clauses for validation and prompt engineering
     CANONICAL_CYPHER_ORDER = [
         "MATCH",
@@ -141,13 +137,65 @@ def _():
     ]
 
     def _get_structured_query_prompt_snippet():
-        """Returns a prompt snippet that enforces the Cypher structure."""
         order_str = " -> ".join(CANONICAL_CYPHER_ORDER)
-        return f"CRITICAL: Always follow the standard Cypher clause order: {order_str}. Do not skip to RETURN before MATCHing patterns."
+        return mo.md(f"CRITICAL: Always follow the standard Cypher clause order: `{order_str}`. Do not skip to RETURN before MATCHing patterns.")
 
     _get_structured_query_prompt_snippet()
+    return
 
-    return CANONICAL_CYPHER_ORDER
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ### Robust Query Parsing with Regex
+    With our strict structure, we can now use a predictable regular expression to decompose the generated queries into their constituent parts. This is useful for validation, logging, and performance analysis.
+    """)
+    return
+
+
+@app.cell
+def _(mo, re):
+    # Regex designed to capture the structural components of our canonical Cypher format
+    # It supports: (OPTIONAL MATCH/MATCH) -> (WHERE)? -> (RETURN) -> (ORDER BY)? -> (LIMIT)?
+    CYPHER_PARSER_REGEX = re.compile(
+        r"(?i)"  # Case-insensitive
+        r"(?P<match_type>OPTIONAL\s+MATCH|MATCH)\s+(?P<match_clause>.+?)"
+        r"(?:\s+WHERE\s+(?P<where_clause>.+?))?"
+        r"\s+RETURN\s+(?P<return_clause>.+?)"
+        r"(?:\s+ORDER\s+BY\s+(?P<order_clause>.+?))?"
+        r"(?:\s+LIMIT\s+(?P<limit_clause>\d+))?"
+        r"\s*;?$",  # Optional semicolon and trailing whitespace
+        re.DOTALL | re.MULTILINE
+    )
+
+    def parse_cypher_query(query: str):
+        """
+        Parses a Cypher query using the canonical structure regex.
+        Returns a dictionary of parts if matched, or None if invalid.
+        """
+        match = CYPHER_PARSER_REGEX.search(query.strip())
+        if not match:
+            return None
+
+        return {k: v.strip() if v else None for k, v in match.groupdict().items()}
+
+    # Example test
+    _test_query = "MATCH (d:Disease)-[:HAS_SYMPTOM]->(s) WHERE s.name = 'Cough' RETURN d.name ORDER BY d.name LIMIT 5"
+    _parsed = parse_cypher_query(_test_query)
+
+    mo.md(
+        f"""
+        #### Parser Demonstration
+        **Input Query:**
+        ```cypher
+        {_test_query}
+        ```
+
+        **Parsed Components:**
+        {mo.as_html(_parsed) if _parsed else "❌ Failed to parse"}
+        """
+    )
+    return
 
 
 if __name__ == "__main__":
