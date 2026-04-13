@@ -190,6 +190,7 @@ def _(mo):
 @app.cell
 def _(data_loader):
     mrdoc_df = data_loader.load_mrdoc_definitions()
+    mrdoc_df[mrdoc_df['TYPE'] == 'rel_inverse'].head(10)
     return (mrdoc_df,)
 
 
@@ -1360,7 +1361,7 @@ def _(conso_sample_cui, mo, mrhier_df):
         - **Parent Atom (`PAUI`)**: `{_sample_row['PAUI'] or 'ROOT'}`
         - **Relationship (`RELA`)**: `{_sample_row['RELA'] or 'N/A'}`
         - **Path to Root (`PTR`)**: `{_sample_row['PTR'] or 'N/A'}`
-        
+
         **What this tells us:**
         The `PTR` field is particularly powerful for graph traversal as it encodes the entire lineage of the concept within the source hierarchy without needing recursive joins.
         """)
@@ -1406,9 +1407,188 @@ def _(mo, mrhier_df):
 @app.cell
 def _(mo):
     mo.md(r"""
+    ## 3.6 MRREL.RRF (Relationships)
+
+    **MRREL.RRF** contains relationship records between concepts, atoms, or other identifiers. It is the core file for understanding how different concepts in the Metathesaurus are connected to each other, beyond simple hierarchies.
+
+    ### Key Column Definitions:
+    - **CUI1**: The first Concept Unique Identifier in the relationship.
+    - **AUI1**: The first Atom Unique Identifier.
+    - **REL**: Broad relationship type (e.g., `PAR` for parent, `CHD` for child, `RO` for other).
+    - **RELA**: Relationship attribute (more specific relationship, e.g., `isa`, `part_of`).
+    - **CUI2**: The second Concept Unique Identifier.
+    - **AUI2**: The second Atom Unique Identifier.
+    - **SAB**: Source Abbreviation.
+    - **STYPE1/STYPE2**: The type of identifier for CUI1/AUI1 and CUI2/AUI2 (e.g., `CUI`, `AUI`).
+    """)
+    return
+
+
+@app.cell
+def _(data_loader):
+    # MRREL is very large, loading a sample
+    mrrel_df = data_loader.load_relationships(limit=1_000_000)
+    return (mrrel_df,)
+
+
+@app.cell
+def _(mo, mrrel_df):
+    def _get_mrrel_scale_analysis():
+        _total_rows = len(mrrel_df)
+        _unique_cuis_1 = mrrel_df['CUI1'].nunique()
+        _unique_cuis_2 = mrrel_df['CUI2'].nunique()
+        _unique_rels = mrrel_df['REL'].nunique()
+        _unique_relas = mrrel_df['RELA'].nunique()
+
+        return mo.md(f"""
+        ### 📊 MRREL Sample Analysis (First 1M rows)
+        - **Total Records in Sample**: {_total_rows:,}
+        - **Unique Concepts in CUI1**: {_unique_cuis_1:,}
+        - **Unique Concepts in CUI2**: {_unique_cuis_2:,}
+        - **Broad Relationship Types (REL)**: {_unique_rels}
+        - **Specific Relationship Attributes (RELA)**: {_unique_relas}
+
+        #### Sample Rows:
+        """)
+
+    _get_mrrel_scale_analysis()
+    return
+
+
+@app.cell
+def _(mrrel_df):
+    mrrel_df.head(10)
+    return
+
+
+@app.cell
+def _(conso_sample_cui, mo, mrrel_df):
+    def _get_relationship_deep_dive():
+        # Try to find relationships for the sample CUI
+        _mask = (mrrel_df['CUI1'] == conso_sample_cui) | (mrrel_df['CUI2'] == conso_sample_cui)
+        _sample_rels = mrrel_df[_mask].reset_index(drop=True)
+
+        if _sample_rels.empty:
+            return mo.md(f"No relationships found for CUI `{conso_sample_cui}` in the current 1M sample.")
+
+        return mo.vstack([
+            mo.md(f"### 🔍 Concept Relationships Deep Dive: `{conso_sample_cui}`"),
+            _sample_rels[['CUI1', 'REL', 'RELA', 'CUI2', 'SAB']].head(10)
+        ])
+
+    _get_relationship_deep_dive()
+    return
+
+
+@app.cell
+def _(mo, mrdoc_df, mrrel_df):
+    def _get_rel_distribution():
+        _rel_counts = mrrel_df['REL'].value_counts().reset_index()
+
+        # Join with MRDOC to get expanded names
+        _rel_labels = mrdoc_df[mrdoc_df['TYPE'] == 'expanded_form'][['VALUE', 'EXPL']].rename(columns={'VALUE': 'REL', 'EXPL': 'Description'})
+        _rel_analysis = _rel_counts.merge(_rel_labels, on='REL', how='left')
+        _rel_analysis = _rel_analysis.rename(columns={'REL': 'Broad Relation (REL)'})
+
+        return mo.vstack([
+            mo.md("### 📊 Broad Relationship Distribution (REL)"),
+            _rel_analysis
+        ])
+
+    _get_rel_distribution()
+    return
+
+
+@app.cell
+def _(mo, mrdoc_df, mrrel_df):
+    def _get_rela_distribution():
+        _rela_counts = mrrel_df['RELA'].value_counts().head(15).reset_index()
+        _rela_counts.columns = ['RELA', 'Count']
+
+        # Join with MRDOC to get expanded names
+        _rela_labels = mrdoc_df[mrdoc_df['DOCKEY'] == 'RELA'][['VALUE', 'EXPL', 'TYPE']].rename(columns={'VALUE': 'RELA', 'EXPL': 'Description'})
+        _rela_analysis = _rela_counts.merge(_rela_labels, on='RELA', how='left')
+        _rela_analysis = _rela_analysis.rename(columns={'RELA': 'Specific Relation (RELA)'})
+
+        return mo.vstack([
+            mo.md("### 📊 Top 15 Relationship Attributes (RELA)"),
+            _rela_analysis
+        ])
+
+    _get_rela_distribution()
+    return
+
+
+@app.cell
+def _(mrrel_df):
+    mrrel_df[mrrel_df['RELA'] == ''].head()
+    return
+
+
+@app.cell
+def _(mo, mrdoc_df, mrrel_df):
+    def _investigate_empty_rela():
+        # Filter for rows where RELA is empty or whitespace
+        _empty_mask = (mrrel_df['RELA'] == '') | (mrrel_df['RELA'].isna())
+        _empty_rela_df = mrrel_df[_empty_mask]
+
+        # Group by REL to see broad relationship types
+        _rel_counts = _empty_rela_df['REL'].value_counts().reset_index()
+        _rel_counts.columns = ['REL', 'Count']
+
+        # Join with MRDOC to get descriptions
+        _rel_labels = mrdoc_df[mrdoc_df['DOCKEY'] == 'REL'][['VALUE', 'EXPL']].rename(columns={'VALUE': 'REL', 'EXPL': 'Description'})
+        _rel_analysis = _rel_counts.merge(_rel_labels, on='REL', how='left')
+        _rel_analysis = _rel_analysis.rename(columns={'REL': 'Broad Relation (REL)'})
+
+        return mo.vstack([
+            mo.md(f"### 🔍 Investigation: Empty RELA Rows"),
+            mo.md(f"Total rows with empty `RELA`: **{len(_empty_rela_df):,}**"),
+            mo.md("#### Breakdown by Broad Relation (REL):"),
+            _rel_analysis
+        ])
+
+    _investigate_empty_rela()
+    return
+
+
+@app.cell
+def _(mo, mrrel_df):
+    def _check_bidirectionality():
+        # Create a set of unique (CUI1, CUI2) pairs
+        _pairs_set = set(zip(mrrel_df['CUI1'], mrrel_df['CUI2']))
+
+        # Calculate how many pairs have an inverse in the same sample
+        _two_way = 0
+        _total = len(_pairs_set)
+
+        for _c1, _c2 in _pairs_set:
+            if (_c2, _c1) in _pairs_set:
+                _two_way += 1
+
+        return mo.md(f"""
+        ### 🔄 Bidirectionality Check (Symmetry)
+
+        This check investigates if concept pairs `(CUI1, CUI2)` have a corresponding reverse relationship `(CUI2, CUI1)` within the current sample.
+
+        - **Total Unique Concept Pairs (C1, C2)**: {_total:,}
+        - **Bidirectional Pairs**: {_two_way:,} ({_two_way/_total*100:.2f}%)
+        - **Unidirectional Pairs (in this sample)**: {_total - _two_way:,} ({(_total - _two_way)/_total*100:.2f}%)
+
+        > [!WARNING]
+        > UMLS relationships are designed to be two-way (e.g., if A is a parent of B, then B is a child of A). However, since we are using a **sample of 1,000,000 rows**, the inverse record for many relationships might be located outside of this sample, leading to a higher "unidirectional" count than reality.
+        """)
+
+    _check_bidirectionality()
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
     # Section 3 Summary: Core Data Files Overview
 
-    The three core data files we've explored provide the foundation of the UMLS Metathesaurus:
+    The core data files we've explored provide the foundation of the UMLS Metathesaurus:
 
     | File | Primary Purpose | Key Insight |
     | :--- | :--- | :--- |
@@ -1417,17 +1597,19 @@ def _(mo):
     | **MRSTY.RRF** (3.3) | Semantic Types | Categorizes each concept into high-level ontological categories. |
     | **MRSAT.RRF** (3.4) | Attributes | Catch-all for specialized source-specific metadata (flags, IDs, tags). |
     | **MRHIER.RRF** (3.5) | Hierarchies | Explicit parent-child paths and full lineage (PTR). |
+    | **MRREL.RRF** (3.6) | Relationships | Connections between concepts, atoms, and other identifiers. |
 
     ### The Semantic Hierarchy
-    These five files work together to create a rich semantic layer:
+    These six files work together to create a rich semantic layer:
 
     1. **Identity**: MRCONSO tells us "what is this concept called?"
     2. **Meaning**: MRDEF tells us "what does this concept mean?"
     3. **Category**: MRSTY tells us "what kind of thing is this?"
     4. **Extensibility**: MRSAT tells us "what else do we know about this from specific sources?"
     5. **Lineage**: MRHIER tells us "where does this concept fit in the tree?"
+    6. **Connection**: MRREL tells us "how is this concept related to other concepts?"
 
-    This pentad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
+    This hexad enables sophisticated semantic reasoning, query expansion, and cross-vocabulary integration in medical informatics applications.
     """)
     return
 

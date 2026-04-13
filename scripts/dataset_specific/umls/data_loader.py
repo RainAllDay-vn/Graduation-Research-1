@@ -1,10 +1,12 @@
-from utils import to_screaming_snake_case
 import os
 import pandas as pd
 import numpy as np
+import subprocess
+import csv
 from typing import Optional, List
 from neo4j import Driver
 from models import DataLoader
+from utils import to_screaming_snake_case
 
 class UmlsDataLoader(DataLoader):
     def __init__(self, driver: Driver, dataset_path: Optional[str] = None):
@@ -170,19 +172,23 @@ class UmlsDataLoader(DataLoader):
         file_path = os.path.join(self.extracted_path, 'META', 'MRHIER.RRF')
         return self._read_rrf(file_path, limit=limit, offset=offset, chunksize=chunksize, columns=columns)
 
+    def load_relationships(self, limit: Optional[int] = None, offset: Optional[int] = None, chunksize: Optional[int] = None, columns: Optional[List[str]] = None) -> pd.DataFrame:
+        """Loads MRREL.RRF which contains relationships between concepts."""
+        file_path = os.path.join(self.extracted_path, 'META', 'MRREL.RRF')
+        return self._read_rrf(file_path, limit=limit, offset=offset, chunksize=chunksize, columns=columns)
+
     def load(self):
         """Loads UMLS data sequentially into the Neo4j database."""
-        aui_to_cui_map = {}
-
         self._clear_database()
         self._create_constraints()
-        self._insert_entities(aui_to_cui_map)
+        self._insert_entities()
         self._insert_concepts()
         self._insert_entity_concept_relations()
-        self._insert_entity_to_entity_relations(aui_to_cui_map)
+        self._insert_entity_to_entity_relations()
 
     def _clear_database(self):
         print("Clearing database...")
+        # Clear data
         cleanup_query = """
         CALL apoc.periodic.iterate(
         "MATCH (n) RETURN n",
@@ -191,11 +197,24 @@ class UmlsDataLoader(DataLoader):
         )
         """
         with self.driver.session() as session:
-            session.run(cleanup_query)
+            session.run(cleanup_query).consume()
 
+        # Clear schema (constraints and indexes)
         cleanup_query = "CALL apoc.schema.assert({}, {})"
         with self.driver.session() as session:
-            session.run(cleanup_query)
+            session.run(cleanup_query).consume()
+
+        # Verify emptiness
+        with self.driver.session() as session:
+            node_count = session.run("MATCH (n) RETURN count(n) AS count").single()["count"]
+            rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS count").single()["count"]
+            
+            if node_count > 0 or rel_count > 0:
+                print(f"WARNING: Database not fully cleared. Nodes: {node_count}, Rels: {rel_count}")
+                print("Retrying simple clear...")
+                session.run("MATCH (n) DETACH DELETE n").consume()
+            else:
+                print("Database cleared successfully.")
 
     def _create_constraints(self):
         print("Creating constraints...")
@@ -206,22 +225,21 @@ class UmlsDataLoader(DataLoader):
         with self.driver.session() as session:
             session.run(query)
 
-    def _insert_entities(self, aui_to_cui_map: dict):
+    def _insert_entities(self):
         print("Inserting entities...")
 
         entities_map = {}
         progress = 0
-        target_cols = ['CUI', 'AUI', 'ISPREF', 'STR']
+        target_cols = ['CUI', 'ISPREF', 'STR']
         for df in self.load_concepts(chunksize=1_000_000, columns=target_cols):
             for row in df.itertuples(index=False):
                 cui = row[0] # CUI
-                aui = row[1] # AUI
-                ispref = row[2] # ISPREF
-                name = row[3] # STR
+                ispref = row[1] # ISPREF
+                name = row[2] # STR
 
                 if cui in entities_map or ispref == 'N':
                     continue
-                aui_to_cui_map[aui] = cui
+
                 entities_map[cui] = {
                     'id': cui,
                     'name': name
@@ -285,45 +303,89 @@ class UmlsDataLoader(DataLoader):
         """
         self._insert_batch(data, query)
 
-    def _insert_entity_to_entity_relations(self, aui_to_cui_map: dict):
+    def _insert_entity_to_entity_relations(self, limit: Optional[int] = None, keep_temp: bool = False):
         print("Inserting entity-to-entity relationships...")
 
-        relation_map = set()
-        progress = 0
-        target_cols = ['AUI', 'PAUI', 'RELA']
-        for df in self.load_hierarchies(chunksize=1_000_000, columns=target_cols):
-            for row in df.itertuples(index=False): 
-                aui = row[0] # AUI
-                paui = row[1] # PAUI
-                rela_val = row[2] # RELA
+        temp_dir = os.path.join(self.dataset_path, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        raw_file = os.path.join(temp_dir, 'rels_raw.csv')
+        sorted_file = os.path.join(temp_dir, 'rels_sorted.csv')
 
-                if aui not in aui_to_cui_map or paui not in aui_to_cui_map: continue
-                cui = aui_to_cui_map[aui]
-                pcui = aui_to_cui_map[paui]
+        inverse_map = {}
+        mrdoc_df = self.load_mrdoc_definitions()
+        for row in mrdoc_df[(mrdoc_df['DOCKEY'] == 'REL') & (mrdoc_df['TYPE'] == 'rel_inverse')][['VALUE', 'EXPL']].itertuples(index=False): 
+            inverse_map[row[0]] = row[1]
 
-                rela_val = str(rela_val).strip()
-                rela = to_screaming_snake_case(rela_val) if rela_val and rela_val != 'nan' else 'ISA'
-                if rela == 'ISA': rela = 'IS_A'
+        print("Phase 1: Streaming relationships to disk...")
+        with open(raw_file, 'w', newline='') as f:
+            writer = csv.writer(f, delimiter='|')
+            
+            def write_if_valid(r, c1, c2):
+                if r and r.strip():
+                    writer.writerow([r, c1, c2])
 
-                if (cui, pcui, rela) in relation_map: continue
-                relation_map.add((cui, pcui, rela))
-            progress += len(df)
-            print(f'Progress: {progress} rows')
+            progress = 0
+            target_cols = ['CUI1', 'CUI2', 'STYPE1', 'STYPE2', 'REL']
+            for df in self.load_relationships(chunksize=1_000_000, columns=target_cols, limit=limit):
+                for row in df.itertuples(index=False): 
+                    cui1, cui2, stype1, stype2, rel = row
+
+                    if stype1 != 'SCUI' or stype2 != 'SCUI':
+                        continue
+                    
+                    write_if_valid(rel, cui1, cui2)
+                    if rel in inverse_map:
+                        write_if_valid(inverse_map[rel], cui2, cui1)
+
+                progress += len(df)
+                print(f'Progress: {progress} rows')
+
+        print("Phase 2: Sorting relationships externally...")
+        # Sort and unique based on the whole line to group entries by the first column (REL)
+        subprocess.run(['sort', '-t|', '-u', raw_file, '-o', sorted_file], check=True)
+
+        print("Phase 3: Grouped insertion into Neo4j...")
+        with open(sorted_file, 'r') as f:
+            reader = csv.reader(f, delimiter='|')
+            current_rel = None
+            batch_data = []
+            
+            for row in reader:
+                if not row: continue
+                rel, c1, c2 = row
                 
-        data_by_rela = {}
-        for cui, pcui, rela in relation_map:
-            if rela not in data_by_rela:
-                data_by_rela[rela] = []
-            data_by_rela[rela].append({'child_id': cui, 'parent_id': pcui})
+                if rel != current_rel:
+                    if current_rel is not None:
+                        self._process_rel_group(current_rel, batch_data)
+                    current_rel = rel
+                    batch_data = []
                 
-        for rela, batch_data in data_by_rela.items():
-            query = f"""
-            UNWIND $batch as item
-            MATCH (child:Base {{id: item.child_id}})
-            MATCH (parent:Base {{id: item.parent_id}})
-            CREATE (child)-[:{rela}]->(parent)
-            """
-            self._insert_batch(batch_data, query)
+                batch_data.append((c1, c2))
+                if len(batch_data) >= 100_000:
+                    self._process_rel_group(current_rel, batch_data)
+                    batch_data = []
+            
+            if current_rel is not None:
+                self._process_rel_group(current_rel, batch_data)
+
+        # Cleanup
+        if not keep_temp:
+            if os.path.exists(raw_file): os.remove(raw_file)
+            if os.path.exists(sorted_file): os.remove(sorted_file)
+            print("Temp files removed.")
+        else:
+            print(f"Temp files kept at: {temp_dir}")
+
+        print("Entity-to-entity relationships insertion completed.")
+
+    def _process_rel_group(self, rel: str, data: list):
+        query = f"""
+        UNWIND $batch as item
+        MATCH (child:Base {{id: item[0]}})
+        MATCH (parent:Base {{id: item[1]}})
+        CREATE (child)-[:{to_screaming_snake_case(rel)}]->(parent)
+        """
+        self._insert_batch(data, query)
 
     def _insert_batch(self, data: list, query: str):
         print(f"Starting to insert {len(data)} rows...")
