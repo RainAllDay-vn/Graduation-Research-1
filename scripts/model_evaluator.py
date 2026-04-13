@@ -268,25 +268,30 @@ class ModelEvaluator:
             logger.error(f"LiteLLM call failed: {e}")
             return {}
 
-    def evaluate(self, system_prompt: str, questions: list[str], force_refresh: bool = False) -> None:
+    def evaluate(self, input: dict[str, str], force_refresh: bool = False) -> None:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
-        logger.info(f"Starting evaluation of {len(questions)} questions using {self.model_name}.")
+        number_of_questions = 0
+        for system_prompt, questions in input.items():
+            number_of_questions += len(questions)
+
+        logger.info(f"Starting evaluation of {number_of_questions} questions using {self.model_name}.")
         
         def process_question(q):
             self.call_model(system_prompt, q, force_refresh=force_refresh)
 
         # ThreadPoolExecutor to run API calls concurrently
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            future_to_q = {executor.submit(process_question, q): q for q in questions}
-            for future in as_completed(future_to_q):
-                q = future_to_q[future]
-                try:
-                    future.result()
-                    logger.info(f"Evaluation returned for: {q[:30]}...")
-                except Exception as exc:
-                    logger.error(f"Question generated an exception: {exc}")
+            for system_prompt, questions in input.items():
+                future_to_q = {executor.submit(process_question, q): q for q in questions}
+                for future in as_completed(future_to_q):
+                    q = future_to_q[future]
+                    try:
+                        future.result()
+                        logger.info(f"Evaluation returned for: {q[:30]}...")
+                    except Exception as exc:
+                        logger.error(f"Question generated an exception: {exc}")
         
 
 if __name__ == "__main__":
