@@ -12,6 +12,8 @@ from typing import List, Dict, Any, Optional, cast
 
 import litellm
 
+litellm.request_timeout = None  # No timeout for requests
+
 # Disable litellm verbose logging
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
