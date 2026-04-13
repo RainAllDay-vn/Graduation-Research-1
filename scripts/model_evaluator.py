@@ -227,7 +227,7 @@ class ModelEvaluator:
             logger.error(f"Failed to fetch cached responses: {e}")
         return results
 
-    def call_model(self, system_prompt: str, question: str, force_refresh: bool = False) -> dict[str, Any]:
+    def call_model_single(self, system_prompt: str, question: str, force_refresh: bool = False) -> dict[str, Any]:
         """
         Calls the model using litellm and returns the response content.
         Checks the sqlite cache first unless force_refresh is True.
@@ -268,22 +268,19 @@ class ModelEvaluator:
             logger.error(f"LiteLLM call failed: {e}")
             return {}
 
-    def evaluate(self, input: dict[str, str], force_refresh: bool = False) -> None:
+    def call_model(self, input: list[(str, str)], force_refresh: bool = False) -> dict[(str, str), str]:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
-        number_of_questions = 0
-        for system_prompt, questions in input.items():
-            number_of_questions += len(questions)
 
-        logger.info(f"Starting evaluation of {number_of_questions} questions using {self.model_name}.")
+        logger.info(f"Starting evaluation of {len(input)} questions using {self.model_name}.")
         
         def process_question(q):
-            self.call_model(system_prompt, q, force_refresh=force_refresh)
+            self.call_model_single(system_prompt, q, force_refresh=force_refresh)
 
         # ThreadPoolExecutor to run API calls concurrently
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            for system_prompt, questions in input.items():
+            for system_prompt, questions in input:
                 future_to_q = {executor.submit(process_question, q): q for q in questions}
                 for future in as_completed(future_to_q):
                     q = future_to_q[future]
@@ -331,4 +328,4 @@ if __name__ == "__main__":
         "Write a Python script to reverse a string."
     ]
     
-    evaluator.evaluate(system_prompt=sample_system_prompt, questions=sample_questions, force_refresh=args.force)
+    evaluator.call_model(system_prompt=sample_system_prompt, questions=sample_questions, force_refresh=args.force)
