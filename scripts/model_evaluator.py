@@ -87,27 +87,30 @@ class ModelEvaluator:
             },
             "requests": {
                 "columns": {
+                    "request_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
                     "model_name": "TEXT",
                     "system_prompt_id": "TEXT",
-                    "question": "TEXT",
+                    "user_prompt": "TEXT",
                     "include_reasoning": "INTEGER",
                     "response_text": "TEXT",
                     "reasoning_content": "TEXT",
-                    "token_1": "TEXT",
-                    "token_2": "TEXT",
-                    "token_3": "TEXT",
-                    "token_4": "TEXT",
-                    "token_5": "TEXT",
-                    "logprob_1": "REAL",
-                    "logprob_2": "REAL",
-                    "logprob_3": "REAL",
-                    "logprob_4": "REAL",
-                    "logprob_5": "REAL",
                     "context_length_exceeded": "INTEGER",
                     "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 },
-                "pk": ["model_name", "system_prompt_id", "question", "include_reasoning"],
-                "fk": "FOREIGN KEY(system_prompt_id) REFERENCES system_prompts(system_prompt_id)"
+                "pk": None, # Defined inline above
+                "fk": "FOREIGN KEY(system_prompt_id) REFERENCES system_prompts(system_prompt_id)",
+                "unique": ["model_name", "system_prompt_id", "user_prompt", "include_reasoning"]
+            },
+            "token_logprobs": {
+                "columns": {
+                    "logprob_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+                    "request_id": "INTEGER",
+                    "token_position": "INTEGER",
+                    "token_text": "TEXT",
+                    "logprob": "REAL"
+                },
+                "pk": None,
+                "fk": "FOREIGN KEY(request_id) REFERENCES requests(request_id) ON DELETE CASCADE"
             }
         }
 
@@ -129,6 +132,8 @@ class ModelEvaluator:
                             constraints.append(f"PRIMARY KEY ({', '.join(config['pk'])})")
                         if config.get("fk"):
                             constraints.append(config["fk"])
+                        if config.get("unique"):
+                            constraints.append(f"UNIQUE ({', '.join(config['unique'])})")
                         
                         query = f"CREATE TABLE {table_name} ({', '.join(col_defs + constraints)})"
                         cursor.execute(query)
@@ -171,31 +176,37 @@ class ModelEvaluator:
                 finish_reason = getattr(choice, "finish_reason", "")
                 context_length_exceeded = 1 if finish_reason == "length" else 0
                 
-                # Safely extract top 5 logprobs if available
-                lps = [None] * 5
-                tokens = [None] * 5
-                try:
-                    if self.logprobs and hasattr(choice, "logprobs") and choice.logprobs:
-                        if hasattr(choice.logprobs, "content") and choice.logprobs.content:
-                            for i, lp_info in enumerate(choice.logprobs.content[:self.top_logprobs]):
-                                if i < 5:
-                                    lps[i] = lp_info.get("logprob") if isinstance(lp_info, dict) else getattr(lp_info, "logprob", None)
-                                    tokens[i] = lp_info.get("token") if isinstance(lp_info, dict) else getattr(lp_info, "token", None)
-                except Exception as e:
-                    logger.debug(f"Could not extract logprobs: {e}")
-                    
+                # Insert or Replace in requests table
+                # Note: We use INSERT OR REPLACE which triggers DELETE on UNIQUE conflict if ON CONFLICT clause is not specified?
+                # Actually, SQLite's INSERT OR REPLACE will delete the old row, and since we have ON DELETE CASCADE, it will delete old logprobs.
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO requests 
-                    (model_name, system_prompt_id, question, include_reasoning, response_text, reasoning_content,
-                     token_1, token_2, token_3, token_4, token_5,
-                     logprob_1, logprob_2, logprob_3, logprob_4, logprob_5, context_length_exceeded)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (model_name, system_prompt_id, user_prompt, include_reasoning, response_text, reasoning_content, context_length_exceeded)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text, reasoning_content,
-                     tokens[0], tokens[1], tokens[2], tokens[3], tokens[4],
-                     lps[0], lps[1], lps[2], lps[3], lps[4], context_length_exceeded)
+                    (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text, reasoning_content, context_length_exceeded)
                 )
+                
+                request_id = cursor.lastrowid
+                
+                # Extract and insert logprobs if available
+                if self.logprobs and hasattr(choice, "logprobs") and choice.logprobs:
+                    if hasattr(choice.logprobs, "content") and choice.logprobs.content:
+                        logprob_inserts = []
+                        for i, lp_info in enumerate(choice.logprobs.content):
+                            # Respect top_logprobs limit if needed, though usually we want all tokens' main logprob
+                            # If we want ALL tokens, we just iterate.
+                            token = lp_info.get("token") if isinstance(lp_info, dict) else getattr(lp_info, "token", None)
+                            lprob = lp_info.get("logprob") if isinstance(lp_info, dict) else getattr(lp_info, "logprob", None)
+                            logprob_inserts.append((request_id, i, token, lprob))
+                        
+                        if logprob_inserts:
+                            cursor.executemany(
+                                "INSERT INTO token_logprobs (request_id, token_position, token_text, logprob) VALUES (?, ?, ?, ?)",
+                                logprob_inserts
+                            )
+
                 conn.commit()
                 logger.info(f"Successfully cached response for question: {question[:30]}...")
         except sqlite3.Error as e:
@@ -212,16 +223,24 @@ class ModelEvaluator:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT response_text, reasoning_content, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT request_id, response_text, reasoning_content, context_length_exceeded
                     FROM requests 
-                    WHERE model_name=? AND system_prompt_id=? AND question=? AND include_reasoning=?
+                    WHERE model_name=? AND system_prompt_id=? AND user_prompt=? AND include_reasoning=?
                     """,
                     (self.model_name, system_prompt_id, question, int(include_reasoning))
                 )
                 row = cursor.fetchone()
                 if row:
+                    result = dict(row)
+                    # Fetch associated logprobs
+                    cursor.execute(
+                        "SELECT token_text, logprob FROM token_logprobs WHERE request_id=? ORDER BY token_position",
+                        (result["request_id"],)
+                    )
+                    lps_rows = cursor.fetchall()
+                    result["logprobs"] = [dict(lp) for lp in lps_rows]
                     logger.info("Cache hit.")
-                    return dict(row)
+                    return result
         except sqlite3.Error as e:
             logger.error(f"Failed to fetch cached response: {e}")
         return {}
@@ -242,15 +261,25 @@ class ModelEvaluator:
                 
                 placeholders = ','.join(['?'] * len(questions))
                 query = f"""
-                    SELECT model_name, question, response_text, reasoning_content, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT request_id, model_name, user_prompt as question, response_text, reasoning_content, context_length_exceeded
                     FROM requests 
-                    WHERE system_prompt_id=? AND include_reasoning=? AND question IN ({placeholders})
+                    WHERE system_prompt_id=? AND include_reasoning=? AND user_prompt IN ({placeholders})
                 """
                 params = [system_prompt_id, int(include_reasoning)] + questions
                 
                 cursor.execute(query, params)
                 rows = cursor.fetchall()
-                results = [dict(row) for row in rows]
+                results = []
+                for row in rows:
+                    res_dict = dict(row)
+                    # Fetch associated logprobs for each result
+                    cursor.execute(
+                        "SELECT token_text, logprob FROM token_logprobs WHERE request_id=? ORDER BY token_position",
+                        (res_dict["request_id"],)
+                    )
+                    lp_rows = cursor.fetchall()
+                    res_dict["logprobs"] = [dict(lp) for lp in lp_rows]
+                    results.append(res_dict)
         except sqlite3.Error as e:
             logger.error(f"Failed to fetch cached responses: {e}")
         return results
