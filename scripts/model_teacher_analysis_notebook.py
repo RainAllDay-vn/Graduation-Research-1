@@ -18,7 +18,7 @@ def _():
     from typing import Dict, Any, Tuple, List
     from CyVer import SyntaxValidator
     from neo4j import GraphDatabase, basic_auth
-    from model_evaluator import ModelEvaluator
+    from model_provider import ModelProvider
 
     # Silence verbose Neo4j notifications
     logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -27,7 +27,7 @@ def _():
         Dict,
         GraphDatabase,
         List,
-        ModelEvaluator,
+        ModelProvider,
         SyntaxValidator,
         Tuple,
         ast,
@@ -68,15 +68,15 @@ def _(mo):
 
 
 @app.cell
-def _(ModelEvaluator, pd):
-    evaluator = ModelEvaluator(model_name='dummy', api_key='')
+def _(ModelProvider, pd):
+    model_provider = ModelProvider(model_name='dummy', api_key='')
 
     # Load reasoning=0 data with all fields
-    df_no_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=0)
+    df_no_reason = model_provider.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=0)
     df_no_reason['query_length'] = pd.to_numeric(df_no_reason['content'].str.len(), errors='coerce')
 
     # Load reasoning=1 data with all fields
-    df_reason = evaluator.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=1)
+    df_reason = model_provider.fetch_cached_responses('Qwen/Qwen3.5-4B', 'lc-quad-2.0', include_reasoning=1)
     df_reason.rename(columns={'content': 'full_content'}, inplace=True)
 
     def _extract_parts(text):

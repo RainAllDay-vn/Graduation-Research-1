@@ -19,7 +19,7 @@ logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class ModelEvaluator:
+class ModelProvider:
     """
     A class for evaluating model accuracy with SQLite-based caching.
     The cache key is (model_name, dataset_name, system_prompt_id, template_id, question, include_reasoning).
@@ -386,7 +386,7 @@ if __name__ == "__main__":
     # Key resolution is handled inside ModelEvaluator.__init__
     api_key = args.api_key
     
-    evaluator = ModelEvaluator(
+    evaluator = ModelProvider(
         model_name=args.model,
         api_key=api_key,
         api_base=args.api_base,

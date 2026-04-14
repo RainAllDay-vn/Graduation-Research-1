@@ -11,9 +11,9 @@ def _():
     import marimo as mo
     import pandas as pd
     import matplotlib.pyplot as plt
-    from model_evaluator import ModelEvaluator
+    from model_provider import ModelProvider
 
-    return ModelEvaluator, mo, os, pd, plt, re
+    return ModelProvider, mo, os, pd, plt, re
 
 
 @app.cell
@@ -42,15 +42,15 @@ def _(pd):
 
 
 @app.cell
-def _(ModelEvaluator, os):
+def _(ModelProvider, os):
     from dotenv import load_dotenv
     load_dotenv()
 
-    evaluator: ModelEvaluator = ModelEvaluator(
+    model_provider = ModelProvider(
         model_name="Qwen/Qwen3.5-4B", 
         api_key=os.getenv("LITELLM_API_KEY", "")
     )
-    return (evaluator,)
+    return (model_provider,)
 
 
 @app.cell
@@ -279,7 +279,7 @@ def _(mo):
 def _(
     FEW_SHOT_PROMPT_TEMPLATE,
     ZERO_SHOT_PROMPT_TEMPLATE,
-    evaluator: "ModelEvaluator",
+    model_provider,
     questions,
 ):
     section_1_evaluation_tasks = [
@@ -288,7 +288,7 @@ def _(
     ]
 
     # Use the correct keyword argument 'input_data'
-    section_1_responses = evaluator.call_model(input_data=section_1_evaluation_tasks)
+    section_1_responses = model_provider.call_model(input_data=section_1_evaluation_tasks)
     return (section_1_responses,)
 
 
@@ -516,7 +516,7 @@ def _(
     APP2_STRUCTURED_REASONING_PROMPT,
     APP3_TERSE_FEW_SHOT_PROMPT,
     APP4_PSEUDOCODE_PROMPT,
-    evaluator: "ModelEvaluator",
+    model_provider,
     questions,
 ):
     section_2_evaluation_tasks = [
@@ -526,7 +526,7 @@ def _(
         (APP4_PSEUDOCODE_PROMPT, questions),
     ]
 
-    section_2_responses = evaluator.call_model(input_data=section_2_evaluation_tasks)
+    section_2_responses = model_provider.call_model(input_data=section_2_evaluation_tasks)
     return (section_2_responses,)
 
 

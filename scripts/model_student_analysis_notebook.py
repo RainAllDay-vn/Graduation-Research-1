@@ -18,7 +18,7 @@ def _():
     from typing import Dict, Any, Tuple, List
     from CyVer import SyntaxValidator
     from neo4j import GraphDatabase, basic_auth
-    from model_evaluator import ModelEvaluator
+    from model_provider import ModelProvider
 
     # Silence verbose Neo4j notifications
     logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -27,7 +27,7 @@ def _():
         Dict,
         GraphDatabase,
         List,
-        ModelEvaluator,
+        ModelProvider,
         SyntaxValidator,
         Tuple,
         ast,
