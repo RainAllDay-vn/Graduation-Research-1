@@ -255,19 +255,19 @@ class ModelEvaluator:
             logger.error(f"Failed to fetch cached responses: {e}")
         return results
 
-    def call_model_single(self, system_prompt: str, question: str, force_refresh: bool = False) -> dict[str, Any]:
+    def call_model_single(self, system_prompt: str, user_prompt: str, force_refresh: bool = False) -> dict[str, Any]:
         """
         Calls the model using litellm and returns the response content.
         Checks the sqlite cache first unless force_refresh is True.
         """
         if not force_refresh:
-            cached = self._fetch_cached_response(system_prompt, question, self.include_reasoning)
+            cached = self._fetch_cached_response(system_prompt, user_prompt, self.include_reasoning)
             if cached:
                 return cached
                 
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": question}
+            {"role": "user", "content": user_prompt}
         ]
         
         kwargs = {}
@@ -277,7 +277,10 @@ class ModelEvaluator:
             kwargs["logprobs"] = True
             kwargs["top_logprobs"] = self.top_logprobs
         if self.include_reasoning:
+            # LiteLLM's standard reasoning trigger
             kwargs["include_reasoning"] = True
+            # SGLang specific trigger for Qwen/DeepSeek
+            kwargs["extra_body"] = {"enable_thinking": True}
             
         model_id = self.model_name
         if self.provider and not model_id.startswith(f"{self.provider}/"):
@@ -291,39 +294,44 @@ class ModelEvaluator:
                 api_key=self.api_key,
                 **kwargs
             )
-            self._cache_response(system_prompt, question, response)
-            return self._fetch_cached_response(system_prompt, question, self.include_reasoning) or {}
+            self._cache_response(system_prompt, user_prompt, response)
+            return self._fetch_cached_response(system_prompt, user_prompt, self.include_reasoning) or {}
             
         except Exception as e:
             logger.error(f"LiteLLM call failed: {e}")
             return {}
 
-    def call_model(self, input: list[(str, str)], force_refresh: bool = False) -> dict[(str, str), str]:
+    def call_model(self, input_data: list[tuple[str, list[str]]], force_refresh: bool = False) -> dict[tuple[str, str], dict[str, Any]]:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
 
-        logger.info(f"Starting evaluation of {len(input)} questions using {self.model_name}.")
+        logger.info(f"Starting evaluation of {sum(len(q) for _, q in input_data)} questions using {self.model_name}.")
         
-        def process_question(q):
-            self.call_model_single(system_prompt, q, force_refresh=force_refresh)
+        def process_question(sp, q):
+            return (sp, q), self.call_model_single(sp, q, force_refresh=force_refresh)
 
+        results = {}
         # ThreadPoolExecutor to run API calls concurrently
         with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            for system_prompt, questions in input:
-                future_to_q = {executor.submit(process_question, q): q for q in questions}
-                for future in as_completed(future_to_q):
-                    q = future_to_q[future]
-                    try:
-                        future.result()
-                        logger.info(f"Evaluation returned for: {q[:30]}...")
-                    except Exception as exc:
-                        logger.error(f"Question generated an exception: {exc}")
+            futures = []
+            for system_prompt, user_prompts in input_data:
+                for user_prompt in user_prompts:
+                    futures.append(executor.submit(process_question, system_prompt, user_prompt))
+            
+            for future in as_completed(futures):
+                try:
+                    (sp, q), result = future.result()
+                    results[(sp, q)] = result
+                except Exception as e:
+                    logger.error(f"Error processing question: {e}")
+
+        return results
         
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on Cypher generation.")
-    parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash", help="Model name (litellm format)")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen3.5-4B", help="Model name (litellm format)")
     parser.add_argument("--api-key", type=str, help="API key for the model")
     parser.add_argument("--force", action="store_true", help="Force refresh cache and call AI")
     parser.add_argument("--db", type=str, help="Path to sqlite cache database (Default from LITELLM_CACHE_PATH or cache/cache.db)")
@@ -359,4 +367,4 @@ if __name__ == "__main__":
         "Write a Python script to reverse a string."
     ]
     
-    evaluator.call_model(input=[(sample_system_prompt, sample_questions)], force_refresh=args.force)
+    evaluator.call_model(input_data=[(sample_system_prompt, sample_questions)], force_refresh=args.force)
