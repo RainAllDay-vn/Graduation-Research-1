@@ -10,9 +10,10 @@ def _():
     import re
     import marimo as mo
     import pandas as pd
+    import matplotlib.pyplot as plt
     from model_evaluator import ModelEvaluator
 
-    return ModelEvaluator, mo, os, pd, re
+    return ModelEvaluator, mo, os, pd, plt, re
 
 
 @app.cell
@@ -300,91 +301,92 @@ def _(
     mo,
     parse_cypher_query,
     pd,
+    plt,
     questions,
     section_1_responses,
 ):
     def _show_summary():
         summary_results = []
         example_sections = []
+        charts = []
+
+        def create_pie_chart(valid, out_of_context, invalid, title):
+            labels = ['Valid Response', 'Out of Context', 'Invalid Format']
+            values = [valid, out_of_context, invalid]
+            colors = ['#4CAF50', '#FF9800', '#f44336'] 
+
+            # Filter out zero values to avoid clutter
+            plot_labels = [l for l, v in zip(labels, values) if v > 0]
+            plot_values = [v for v in values if v > 0]
+            plot_colors = [c for c, v in zip(colors, values) if v > 0]
+
+            if not plot_values:
+                return mo.md(f"**{title}**: No data available")
+
+            fig, ax = plt.subplots(figsize=(5, 5))
+            ax.pie(plot_values, labels=plot_labels, autopct='%1.1f%%', startangle=90, colors=plot_colors)
+            ax.set_title(title)
+            plt.tight_layout()
+            return fig
 
         for prompt_template, template_name in [
             (ZERO_SHOT_PROMPT_TEMPLATE, "Zero-Shot"),
             (FEW_SHOT_PROMPT_TEMPLATE, "Few-Shot"),
         ]:
-            valid_structure_count = 0
+            valid_count = 0
+            out_of_context_count = 0
+            invalid_format_count = 0
+
             valid_examples = []
             invalid_examples = []
 
             for question in questions:
-                # responses is a dict[(system_prompt, question), dict]
                 result = section_1_responses.get((prompt_template, question), {})
                 response_text = result.get("response_text", "")
+                context_length_exceeded = result.get("context_length_exceeded", 0)
 
                 parsed_result = parse_cypher_query(response_text)
                 is_valid = "error" not in parsed_result
 
-                if is_valid:
-                    valid_structure_count += 1
+                if context_length_exceeded == 1:
+                    out_of_context_count += 1
+                    error_msg = "Context length exceeded or empty response"
                     query_display = response_text
-                    error_msg = None
-                else:
-                    query_display = response_text
+                elif not is_valid:
+                    invalid_format_count += 1
                     error_msg = parsed_result.get("error", "Unknown parsing error")
+                    query_display = response_text
+                else:
+                    valid_count += 1
+                    error_msg = None
+                    query_display = response_text
 
                 # Collect examples
-                if is_valid:
-                    if len(valid_examples) < 2:
-                        valid_examples.append({"question": question, "query": query_display})
-                else:
-                    if len(invalid_examples) < 2:
-                        invalid_examples.append({"question": question, "query": query_display, "error": error_msg})
+                if is_valid and len(valid_examples) < 2:
+                    valid_examples.append({"question": question, "query": query_display})
+                elif not is_valid and len(invalid_examples) < 2:
+                    invalid_examples.append({"question": question, "query": query_display, "error": error_msg})
 
             summary_results.append({
                 "Strategy": template_name,
                 "Total": len(questions),
-                "Valid": valid_structure_count,
-                "Adherence": f"{(valid_structure_count / len(questions)) * 100:.1f}%"
+                "Valid": valid_count,
+                "Out of Context": out_of_context_count,
+                "Invalid Format": invalid_format_count,
+                "Adherence": f"{(valid_count / len(questions)) * 100:.1f}%"
             })
 
-            # Format examples for this strategy
-            valid_md = "\n".join([f"**Q:** {ex['question']}\n```cypher\n{ex['query']}\n```" for ex in valid_examples])
-            invalid_md = "\n".join([f"**Q:** {ex['question']}\n**Issue:** {ex['error']}\n```\n{ex['query']}\n```" for ex in invalid_examples])
+            charts.append(create_pie_chart(valid_count, out_of_context_count, invalid_format_count, f"{template_name} Adherence"))
 
-            example_sections.append(
-                mo.md(f"""
-    ### {template_name} Examples
-    #### ✅ Valid Example
-    {valid_md if valid_md else "*No valid examples found.*"}
-
-    #### ❌ Invalid Examples
-    {invalid_md if invalid_md else "*No invalid examples found.*"}
-
-                """)
-            )
-
-        # Convert to pandas DataFrame for better visualization as requested
         summary_df = pd.DataFrame(summary_results)
-
-        # Dynamic conclusion based on results
         best_strategy = max(summary_results, key=lambda x: float(x["Adherence"].strip("%")))
 
-        conclusion = mo.md(f"""
-        ### Conclusion: Structured Query Generation
-
-        The evaluation highlights a significant difference in how the model handles strict structural requirements:
-        - **{summary_results[0]['Strategy']}** achieved an adherence rate of **{summary_results[0]['Adherence']}**.
-        - **{summary_results[1]['Strategy']}** achieved an adherence rate of **{summary_results[1]['Adherence']}**.
-
-        The **{best_strategy['Strategy']}** strategy is clearly superior for ensuring reliable, parseable Cypher queries.
-
-        **Next Steps:**
-        With the high adherence rate from the **{best_strategy['Strategy']}** approach, we can move forward to **Section 2: Reasoning Efficiency**, where we will focus on making the thinking process more concise without losing query quality.
-        """)
         return mo.vstack([
-            mo.md("## Evaluation Results"),
+            mo.md("## Evaluation Results: Query Adherence"),
+            mo.hstack(charts, justify="space-around"),
+            mo.md("### Numerical Summary"),
             summary_df,
-            conclusion,
-            example_sections[0]
+            mo.md(f"**Conclusion:** The **{best_strategy['Strategy']}** strategy shows the best adherence to the canonical structure."),
         ])
 
     _show_summary()
