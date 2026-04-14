@@ -202,8 +202,6 @@ def _(get_structured_query_prompt_snippet, mo):
     1. DO NOT use these clauses: WITH, UNWIND, CREATE, MERGE, SET, DELETE.
     2. Separate your reasoning from the final query.
     3. Wrap your final, executable Cypher query inside `<cypher>` and `</cypher>` tags.
-
-    Question: {{question}}
     """
 
     mo.md(f'''
@@ -249,8 +247,6 @@ def _(ZERO_SHOT_PROMPT_TEMPLATE, mo):
     LIMIT 5
     </cypher>
     ---
-
-    Question: {{question}}
     """
 
     mo.md(f'''
@@ -272,72 +268,117 @@ def _(mo):
 @app.cell
 def _(
     FEW_SHOT_PROMPT_TEMPLATE,
+    ZERO_SHOT_PROMPT_TEMPLATE,
     evaluation_df,
-    evaluator,
+    evaluator: "ModelEvaluator",
     mo,
     parse_cypher_query,
     pd,
     re,
 ):
     def _run_evaluation():
-        _cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
+        cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
 
-        _questions = evaluation_df['question'].tolist()
-        _input = [
-            (FEW_SHOT_PROMPT_TEMPLATE.replace("{{question}}", q), q) 
-            for q in _questions
+        questions = evaluation_df['question'].tolist()
+        evaluation_tasks = [
+            (ZERO_SHOT_PROMPT_TEMPLATE, questions),
+            (FEW_SHOT_PROMPT_TEMPLATE, questions),
         ]
 
-        evaluator.call_model(_input)
+        # Use the correct keyword argument 'input_data'
+        responses = evaluator.call_model(input_data=evaluation_tasks)
 
-        _cached_responses = evaluator.fetch_all_cached_responses(FEW_SHOT_PROMPT_TEMPLATE, _questions, evaluator.include_reasoning)
+        summary_results = []
+        example_sections = []
 
-        _results = []
-        for _q in _questions:
-            _response = next((r for r in _cached_responses if r.get('question') == _q), {})
-            _response_text = _response.get('response_text', '')
+        for prompt_template, template_name in [
+            (ZERO_SHOT_PROMPT_TEMPLATE, "Zero-Shot"),
+            (FEW_SHOT_PROMPT_TEMPLATE, "Few-Shot"),
+        ]:
+            valid_structure_count = 0
+            valid_examples = []
+            invalid_examples = []
 
-            _cypher_match = _cypher_pattern.search(_response_text)
-            _extracted_cypher = _cypher_match.group(1).strip() if _cypher_match else ''
+            for question in questions:
+                # responses is a dict[(system_prompt, question), dict]
+                result = responses.get((prompt_template, question), {})
+                response_text = result.get("response_text", "")
 
-            if _extracted_cypher:
-                _parsed = parse_cypher_query(_extracted_cypher)
-                if _parsed:
-                    _results.append({
-                        'question': _q,
-                        'status': 'parsed',
-                        'match_clause': _parsed.get('match_clause'),
-                        'where_clause': _parsed.get('where_clause'),
-                        'return_clause': _parsed.get('return_clause'),
-                    })
+                # Extract query from <cypher> tags
+                cypher_match = cypher_pattern.search(response_text if response_text else "")
+
+                is_valid = False
+                query_display = ""
+                error_msg = ""
+
+                if cypher_match:
+                    query = cypher_match.group(1).strip()
+                    # Validate structure using the parser defined earlier
+                    if parse_cypher_query(query) is not None:
+                        valid_structure_count += 1
+                        is_valid = True
+                        query_display = query
+                    else:
+                        query_display = query
+                        error_msg = "Regex structure mismatch (canonical order ignored)"
                 else:
-                    _results.append({
-                        'question': _q,
-                        'status': 'invalid_structure',
-                        'extracted_cypher': _extracted_cypher[:100],
-                    })
-            else:
-                _results.append({
-                    'question': _q,
-                    'status': 'no_cypher_tag',
-                    'response_preview': _response_text[:100],
-                })
+                    query_display = (response_text[:200] + "...") if response_text else "[Empty Response]"
+                    error_msg = "Missing <cypher> tags"
 
-        _results_df = pd.DataFrame(_results)
-        _status_counts = _results_df['status'].value_counts()
+                # Collect examples
+                if is_valid:
+                    if len(valid_examples) < 2:
+                        valid_examples.append({"question": question, "query": query_display})
+                else:
+                    if len(invalid_examples) < 2:
+                        invalid_examples.append({"question": question, "query": query_display, "error": error_msg})
 
-        _parsed_count = _status_counts.get('parsed', 0)
-        _invalid_count = _status_counts.get('invalid_structure', 0)
-        _no_tag_count = _status_counts.get('no_cypher_tag', 0)
-        _total = len(_results_df)
+            summary_results.append({
+                "Strategy": template_name,
+                "Total": len(questions),
+                "Valid": valid_structure_count,
+                "Adherence": f"{(valid_structure_count / len(questions)) * 100:.1f}%"
+            })
 
+            # Format examples for this strategy
+            valid_md = "\n".join([f"**Q:** {ex['question']}\n```cypher\n{ex['query']}\n```" for ex in valid_examples])
+            invalid_md = "\n".join([f"**Q:** {ex['question']}\n**Issue:** {ex['error']}\n```\n{ex['query']}\n```" for ex in invalid_examples])
+        
+            example_sections.append(
+                mo.md(f"""
+    ### {template_name} Examples
+    #### ✅ Valid Example
+    {valid_md if valid_md else "*No valid examples found.*"}
+
+    #### ❌ Invalid Examples
+    {invalid_md if invalid_md else "*No invalid examples found.*"}
+
+                """)
+            )
+
+        # Convert to pandas DataFrame for better visualization as requested
+        summary_df = pd.DataFrame(summary_results)
+
+        # Dynamic conclusion based on results
+        best_strategy = max(summary_results, key=lambda x: float(x["Adherence"].strip("%")))
+
+        conclusion = mo.md(f"""
+        ### Conclusion: Structured Query Generation
+
+        The evaluation highlights a significant difference in how the model handles strict structural requirements:
+        - **{summary_results[0]['Strategy']}** achieved an adherence rate of **{summary_results[0]['Adherence']}**.
+        - **{summary_results[1]['Strategy']}** achieved an adherence rate of **{summary_results[1]['Adherence']}**.
+
+        The **{best_strategy['Strategy']}** strategy is clearly superior for ensuring reliable, parseable Cypher queries.
+
+        **Next Steps:**
+        With the high adherence rate from the **{best_strategy['Strategy']}** approach, we can move forward to **Section 2: Reasoning Efficiency**, where we will focus on making the thinking process more concise without losing query quality.
+        """)
         return mo.vstack([
-            mo.md(f"### Evaluation Results ({_total} questions)"),
-            mo.md(f"- **Successfully Parsed**: {_parsed_count} ({_parsed_count/_total*100:.1f}%)"),
-            mo.md(f"- **Invalid Structure**: {_invalid_count} ({_invalid_count/_total*100:.1f}%)"),
-            mo.md(f"- **No Cypher Tag**: {_no_tag_count} ({_no_tag_count/_total*100:.1f}%)"),
-            mo.md("#### Sample Results:"),
-            _results_df.head(10)
+            mo.md("## Evaluation Results"),
+            summary_df,
+            conclusion,
+            example_sections[0]
         ])
 
     _run_evaluation()
