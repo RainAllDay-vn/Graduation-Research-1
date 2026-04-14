@@ -70,10 +70,8 @@ def _(mo):
 
     ### 3. Minimize Error Frequency
     Address common syntax and semantic errors discovered in the current benchmarks:
-    - **Prompt Engineering:** Add examples or guidelines to avoid common errors.
-    - **Self-Correction:** Allow the LLM to retry if the query is invalid.
     - **Ontology Awareness:** Injecting more specific medical ontology constraints into the system prompt.
-    - **Error-Correcting Fine-Tuning:** Training on a "synthetic correction" dataset where the model learns to fix its own previous mistakes.
+    - **Self-Correction:** Allow the LLM to retry if the query is invalid.
     """)
     return
 
@@ -131,7 +129,7 @@ def _(mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ### Robust Query Parsing with Regex
+    #### Robust Query Parsing with Regex
     With our strict structure, we can now use a predictable regular expression to decompose the generated queries into their constituent parts. This is useful for validation, logging, and performance analysis.
     """)
     return
@@ -382,9 +380,9 @@ def _(
         best_strategy = max(summary_results, key=lambda x: float(x["Adherence"].strip("%")))
 
         return mo.vstack([
-            mo.md("## Evaluation Results: Query Adherence"),
+            mo.md("### Evaluation Results: Query Adherence"),
             mo.hstack(charts, justify="space-around"),
-            mo.md("### Numerical Summary"),
+            mo.md("#### Numerical Summary"),
             summary_df,
             mo.md(f"**Conclusion:** The **{best_strategy['Strategy']}** strategy shows the best adherence to the canonical structure."),
         ])
@@ -596,10 +594,15 @@ def _(
         summary_df_s2 = summary_df_s2.drop(columns=['Valid_float'])
 
         return mo.vstack([
-            mo.md("## Section 2: Reasoning Efficiency Results"),
+            mo.md("### Section 2: Reasoning Efficiency Results"),
             mo.md("Evaluating the impact of different approaches on reasoning length and query validity."),
             summary_df_s2,
-            mo.md(f"**Conclusion:** The **{best_overall['Strategy']}** approach offers the best trade-off, achieving {best_overall['Valid %']} validity with an average reasoning length of {best_overall['Avg Reasoning Length (chars)']} characters.")
+            mo.md(
+                "**Analysis:** It seems like there isn't much change to reasoning length compared to Section 1 for most strategies. "
+                "The model largely ignores explicit length constraints and structured reasoning instructions, continuing to produce extensive reasoning blocks. "
+                "Only the Terse Few-Shot strategy shows effectiveness in reducing reasoning length, highlighting that providing demonstrations "
+                "is much more impactful than direct instructions for this model's thinking process."
+            )
         ])
 
     _show_section_2_summary()
