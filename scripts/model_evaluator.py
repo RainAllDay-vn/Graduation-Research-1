@@ -6,7 +6,7 @@ import argparse
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 
 import litellm
 
@@ -245,55 +245,10 @@ class ModelEvaluator:
             logger.error(f"Failed to fetch cached response: {e}")
         return {}
 
-    def fetch_all_cached_responses(self, system_prompt: str, questions: list[str], include_reasoning: bool) -> list[dict[str, Any]]:
-        """
-        Fetches all cached model responses from the SQLite database.
-        """
-        system_prompt_id = self._get_system_prompt_id(system_prompt)
-        results = []
-        if not questions:
-            return results
-            
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                
-                placeholders = ','.join(['?'] * len(questions))
-                query = f"""
-                    SELECT request_id, model_name, user_prompt as question, response_text, reasoning_content, context_length_exceeded
-                    FROM requests 
-                    WHERE system_prompt_id=? AND include_reasoning=? AND user_prompt IN ({placeholders})
-                """
-                params = [system_prompt_id, int(include_reasoning)] + questions
-                
-                cursor.execute(query, params)
-                rows = cursor.fetchall()
-                results = []
-                for row in rows:
-                    res_dict = dict(row)
-                    # Fetch associated logprobs for each result
-                    cursor.execute(
-                        "SELECT token_text, logprob FROM token_logprobs WHERE request_id=? ORDER BY token_position",
-                        (res_dict["request_id"],)
-                    )
-                    lp_rows = cursor.fetchall()
-                    res_dict["logprobs"] = [dict(lp) for lp in lp_rows]
-                    results.append(res_dict)
-        except sqlite3.Error as e:
-            logger.error(f"Failed to fetch cached responses: {e}")
-        return results
-
-    def call_model_single(self, system_prompt: str, user_prompt: str, force_refresh: bool = False) -> dict[str, Any]:
+    def call_model_single(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         """
         Calls the model using litellm and returns the response content.
-        Checks the sqlite cache first unless force_refresh is True.
         """
-        if not force_refresh:
-            cached = self._fetch_cached_response(system_prompt, user_prompt, self.include_reasoning)
-            if cached:
-                return cached
-                
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
@@ -323,39 +278,68 @@ class ModelEvaluator:
                 api_key=self.api_key,
                 **kwargs
             )
-            self._cache_response(system_prompt, user_prompt, response)
-            return self._fetch_cached_response(system_prompt, user_prompt, self.include_reasoning) or {}
+            return response
             
         except Exception as e:
             logger.error(f"LiteLLM call failed: {e}")
             return {}
 
-    def call_model(self, input_data: list[tuple[str, list[str]]], force_refresh: bool = False) -> dict[tuple[str, str], dict[str, Any]]:
+    def call_model_with_checker(
+        self, 
+        system_prompt: str, 
+        user_prompt: str, 
+        checker: Callable[[str], str], 
+        max_retries: int = 3, 
+    ) -> dict[str, Any]:
+        """
+        Calls the model and validates the response using the provided checker.
+        """
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Calling model {self.model_name} (Attempt {attempt + 1}/{max_retries})...")
+                response: dict[str, Any] = self.call_model_single(system_prompt, user_prompt)
+                
+                response_text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
+                
+                # Check validity
+                check_result = checker(response_text)
+                if check_result == "OK":
+                    return response
+                
+                # If not valid, prepare for retry with feedback
+                logger.warning(f"Model response failed validation (Attempt {attempt + 1}): {check_result}")
+                    
+            except Exception as e:
+                logger.error(f"LiteLLM call failed on attempt {attempt + 1}: {e}")
+                
+        logger.error(f"Failed to get a valid response after {max_retries} attempts.")
+        return {}
+
+    def call_model(self, input_data: list[tuple[str, str]], checker: Optional[Callable[[str], str]] = None, force_refresh: bool = False) -> dict[tuple[str, str], dict[str, Any]]:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
-
-        logger.info(f"Starting evaluation of {sum(len(q) for _, q in input_data)} questions using {self.model_name}.")
+        logger.info(f"Starting evaluation of {len(input_data)} questions using {self.model_name}.")
         
-        def process_question(sp, q):
-            return (sp, q), self.call_model_single(sp, q, force_refresh=force_refresh)
+        def process_question(system_prompt: str, user_prompt: str, checker: Optional[Callable[[str], str]] = None):
+            if not force_refresh:
+                cached_response = self._fetch_cached_response(system_prompt, user_prompt)
+                if cached_response:
+                    return (system_prompt, user_prompt), cached_response
+            if checker:
+                response = self.call_model_with_checker(system_prompt, user_prompt, checker)
+            else:
+                response = self.call_model_single(system_prompt, user_prompt)
+            self._cache_response(system_prompt, user_prompt, response)
+            return (system_prompt, user_prompt), response
 
         results = {}
-        
-        all_requests = []
-        for system_prompt, user_prompts in input_data:
-            for user_prompt in user_prompts:
-                all_requests.append((system_prompt, user_prompt))
-                
-        if not all_requests:
-            return results
-            
         # Try the first request to fail fast if there's an issue (e.g., connection error)
         try:
-            first_sp, first_q = all_requests[0]
+            system_prompt, user_prompt = input_data[0]
             logger.info("Trying first request to verify connection...")
-            _, first_res = process_question(first_sp, first_q)
-            results[(first_sp, first_q)] = first_res
+            _, first_res = process_question(system_prompt, user_prompt, checker)
+            results[(system_prompt, user_prompt)] = first_res
             
             if not first_res:
                 logger.error("First request failed (returned empty). Aborting remaining evaluation.")
@@ -365,17 +349,17 @@ class ModelEvaluator:
              logger.error(f"Error processing first request, aborting: {e}")
              return results
 
-        if len(all_requests) > 1:
+        if len(input_data) > 1:
             # ThreadPoolExecutor to run API calls concurrently
             with ThreadPoolExecutor(max_workers=self.workers) as executor:
                 futures = []
-                for sp, q in all_requests[1:]:
-                    futures.append(executor.submit(process_question, sp, q))
+                for system_prompt, user_prompt in input_data[1:]:
+                    futures.append(executor.submit(process_question, system_prompt, user_prompt, checker))
                 
                 for future in as_completed(futures):
                     try:
-                        (sp, q), result = future.result()
-                        results[(sp, q)] = result
+                        (system_prompt, user_prompt), result = future.result()
+                        results[(system_prompt, user_prompt)] = result
                     except Exception as e:
                         logger.error(f"Error processing question: {e}")
 
