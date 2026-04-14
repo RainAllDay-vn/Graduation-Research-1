@@ -99,6 +99,15 @@ class UmlsDataLoader(DataLoader):
             keep_default_na=False
         )
         
+        if columns:
+            if chunksize:
+                def chunk_reorder_iterator(it, cols):
+                    for chunk in it:
+                        yield chunk[cols]
+                return chunk_reorder_iterator(df, columns)
+            else:
+                return df[columns]
+
         return df
     
     def _infer_columns(self, file_path: str) -> Optional[List[str]]:
@@ -351,22 +360,22 @@ class UmlsDataLoader(DataLoader):
         with open(raw_file, 'w', newline='') as f:
             writer = csv.writer(f, delimiter='|')
             
-            def write_if_valid(r, c1, c2):
-                if r and r.strip():
-                    writer.writerow([r, c1, c2])
+            def write_if_valid(rel, c1, c2, rela):
+                if rel and rel.strip():
+                    writer.writerow([rel, c1, c2, rela])
 
             progress = 0
-            target_cols = ['CUI1', 'CUI2', 'STYPE1', 'STYPE2', 'REL']
+            target_cols = ['CUI1', 'CUI2', 'STYPE1', 'STYPE2', 'REL', 'RELA']
             for df in self.load_relationships(chunksize=1_000_000, columns=target_cols, limit=limit):
                 for row in df.itertuples(index=False): 
-                    cui1, cui2, stype1, stype2, rel = row
+                    cui1, cui2, stype1, stype2, rel, rela = row
 
-                    if stype1 != 'SCUI' or stype2 != 'SCUI':
+                    if stype1 != 'SCUI' or stype2 != 'SCUI' or rela == '':
                         continue
                     
-                    write_if_valid(rel, cui1, cui2)
+                    write_if_valid(rel, cui1, cui2, rela)
                     if rel in inverse_map:
-                        write_if_valid(inverse_map[rel], cui2, cui1)
+                        write_if_valid(inverse_map[rel], cui2, cui1, rela)
 
                 progress += len(df)
                 print(f'Progress: {progress} rows')
@@ -383,7 +392,7 @@ class UmlsDataLoader(DataLoader):
             
             for row in reader:
                 if not row: continue
-                rel, c1, c2 = row
+                rel, c1, c2, rela = row
                 
                 if rel != current_rel:
                     if current_rel is not None:
@@ -391,7 +400,7 @@ class UmlsDataLoader(DataLoader):
                     current_rel = rel
                     batch_data = []
                 
-                batch_data.append((c1, c2))
+                batch_data.append((c1, c2, rela))
                 if len(batch_data) >= 100_000:
                     self._process_rel_group(current_rel, batch_data)
                     batch_data = []
@@ -414,7 +423,7 @@ class UmlsDataLoader(DataLoader):
         UNWIND $batch as item
         MATCH (child:Base {{id: item[0]}})
         MATCH (parent:Base {{id: item[1]}})
-        CREATE (child)-[:{to_screaming_snake_case(rel)}]->(parent)
+        CREATE (child)-[:{to_screaming_snake_case(rel)} {{name: item[2]}}]->(parent)
         """
         self._insert_batch(data, query)
 

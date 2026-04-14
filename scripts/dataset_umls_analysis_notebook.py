@@ -1614,7 +1614,6 @@ def _(mo):
     return
 
 
-
 @app.cell
 def _(mo):
     mo.md(r"""
@@ -1631,7 +1630,7 @@ def _(mo):
     ## 4.1 SRSTR (Semantic Network Relation Structure)
 
     **SRSTR** defines the structural rules of the Semantic Network. While `MRREL` lists actual relationships between specific concepts (like Concept A *isa* Concept B), `SRSTR` dictates the *allowed* relationships between general Semantic Types (e.g., "Biologic Function" *affects* "Organism").
-    
+
     This acts as a high-level ontology or schema constraint for the Knowledge Graph.
 
     ### Key Column Definitions:
@@ -1667,7 +1666,7 @@ def _(mo, srstr_df):
             md,
             srstr_df.head(10)
         ])
-    
+
     _get_srstr_overview()
     return
 
@@ -1678,17 +1677,17 @@ def _(mo, srstr_df):
         # Count the occurrences of each relation type
         counts = srstr_df['RL'].value_counts().reset_index()
         counts.columns = ['Relation (RL)', 'Number of Allowed Linkages']
-        
+
         md = mo.md(f"""
         ### 🔗 Most Defined Relationships
         Below are the relationships that have the most defined linkages between different Semantic Types. We limit to the top 10 for brevity.
         """)
-        
+
         return mo.vstack([
             md,
             counts.head(10)
         ])
-        
+
     _get_relations_distribution()
     return
 
@@ -1698,19 +1697,19 @@ def _(mo, srstr_df):
     def _get_deep_dive():
         # Look at rules specifically involving the 'affects' relation
         affects_rules = srstr_df[srstr_df['RL'] == 'affects']
-        
+
         md = mo.md(f"""
         ### 🔍 Deep Dive: The `affects` Relation
         What kinds of Semantic Types are allowed to "affect" each other? There are **{len(affects_rules)}** rules specifically defining this relation.
-        
+
         Here are 10 examples of valid semantic linkages where one entity *affects* another:
         """)
-        
+
         return mo.vstack([
             md,
             affects_rules.head(10)
         ])
-        
+
     _get_deep_dive()
     return
 
@@ -1720,7 +1719,7 @@ def _(mo, srstr_df):
     def _get_inheritance_analysis():
         counts = srstr_df['LS'].value_counts().reset_index()
         counts.columns = ['Link Status (LS)', 'Count']
-        
+
         # Add human-readable descriptions assuming the standard meanings
         descriptions = {
             'D': 'Defined (inherited by children)',
@@ -1728,17 +1727,17 @@ def _(mo, srstr_df):
             'DNI': 'Defined Not Inherited (applies only to this specific node)'
         }
         counts['Meaning'] = counts['Link Status (LS)'].map(descriptions)
-        
+
         md = mo.md(f"""
         ### 🧬 Inheritance Rules (Link Status)
         The `LS` field shows how relationships cascade down the semantic hierarchy. As we can see, most relations are standardly inherited (`D`).
         """)
-        
+
         return mo.vstack([
             md,
             counts
         ])
-    
+
     _get_inheritance_analysis()
     return
 
