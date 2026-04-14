@@ -11,6 +11,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Dict, Any, Optional, cast
 
 import litellm
+from dotenv import load_dotenv
+
+load_dotenv()
 
 litellm.request_timeout = None  # No timeout for requests
 
@@ -307,9 +310,9 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash", help="Model name (litellm format)")
     parser.add_argument("--api-key", type=str, help="API key for the model")
     parser.add_argument("--force", action="store_true", help="Force refresh cache and call AI")
-    parser.add_argument("--db", type=str, default="cache/cache.db", help="Path to sqlite cache database")
-    parser.add_argument("--workers", type=int, default=5, help="Number of parallel workers for API calls")
-    parser.add_argument("--api-base", type=str, help="Base URL for the model API")
+    parser.add_argument("--db", type=str, default=os.environ.get("LITELLM_CACHE_PATH", "cache/cache.db"), help="Path to sqlite cache database")
+    parser.add_argument("--workers", type=int, default=int(os.environ.get("LITELLM_WORKER", 5)), help="Number of parallel workers for API calls")
+    parser.add_argument("--api-base", type=str, default=os.environ.get("LITELLM_API_URL"), help="Base URL for the model API")
     parser.add_argument("--provider", type=str, help="Provider format for the model (e.g., openai, anthropic)")
     parser.add_argument("--logprobs", action="store_true", help="Request log probabilities from the model")
     parser.add_argument("--top-logprobs", type=int, default=5, help="Number of top log probabilities to return (if logprobs enriched)")
@@ -339,4 +342,4 @@ if __name__ == "__main__":
         "Write a Python script to reverse a string."
     ]
     
-    evaluator.call_model(system_prompt=sample_system_prompt, questions=sample_questions, force_refresh=args.force)
+    evaluator.call_model(input=[(sample_system_prompt, sample_questions)], force_refresh=args.force)
