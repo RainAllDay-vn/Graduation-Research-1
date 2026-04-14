@@ -1,9 +1,21 @@
 import os
+import re
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import importlib
 
 from models import Concept, Entity, Relation, DataLoader
+
+CYPHER_PARSER_REGEX = re.compile(
+    r"(?i)"  # Case-insensitive
+    r"(?P<match_type>OPTIONAL\s+MATCH|MATCH)\s+(?P<match_clause>.+?)"
+    r"(?:\s+WHERE\s+(?P<where_clause>.+?))?"
+    r"\s+RETURN\s+(?P<return_clause>.+?)"
+    r"(?:\s+ORDER\s+BY\s+(?P<order_clause>.+?))?"
+    r"(?:\s+LIMIT\s+(?P<limit_clause>\d+))?"
+    r"\s*;?$",  # Optional semicolon and trailing whitespace
+    re.DOTALL | re.MULTILINE
+)
 
 load_dotenv()
 
@@ -150,6 +162,27 @@ class KnowledgeGraph:
                 target=target,
                 qualifiers={}
             )
+
+    def validate_query(self, response: str) -> dict:
+        """
+        Parses a Cypher query from a model response using the canonical structure regex.
+        Returns a dictionary of parts if matched, or a dictionary with an "error" key if invalid.
+        """
+
+        if response is None:
+            return {"error": "Response is None"}
+
+        cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
+        query_match = cypher_pattern.search(response.strip())
+        if not query_match:
+            return {"error": "No <cypher> tags found"}
+        query = query_match.group(1).strip()
+
+        match = CYPHER_PARSER_REGEX.search(query)
+        if not match:
+            return {"error": "Regex structure mismatch (canonical order ignored)"}
+
+        return {k: v.strip() if v else None for k, v in match.groupdict().items()}
 
 if __name__ == "__main__":
     knowledge_graph = KnowledgeGraph()
