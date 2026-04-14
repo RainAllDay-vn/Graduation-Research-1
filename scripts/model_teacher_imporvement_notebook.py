@@ -393,5 +393,218 @@ def _(
     return
 
 
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 2. Optimizing Reasoning Efficiency
+
+    When using teacher models, especially smaller ones or models with limited context windows, verbose reasoning (e.g., long `<think>` blocks) can cause the model to exceed its maximum output length or context limits. This leads to truncated responses and missing Cypher queries.
+
+    Here are the common approaches to refine the reasoning process and ensure it stays within context limits:
+
+    ### Approach 1: Explicit Length Constraints
+    Directly instruct the model to limit its reasoning length via prompt engineering.
+    - **Example:** "Keep your reasoning concise and under 3 sentences." or "Limit your thinking to a maximum of 50 words."
+    - **Pros:** Simple to implement.
+    - **Cons:** LLMs are often bad at exact word/sentence counts and might still over-generate or truncate early.
+
+    ### Approach 2: Step-by-Step Budgeting (Structured Reasoning Formats)
+    Force the model to output its reasoning in a very specific, brief format rather than free-form paragraphs.
+    - **Example:**
+      - `Entities identified: [X]`
+      - `Relationship: [Y]`
+      - `Pattern logic: [Z]`
+    - **Pros:** Highly predictable length; easy to parse.
+    - **Cons:** Requires more effort in prompt design; strict format might limit complex reasoning needed for hard queries.
+
+    ### Approach 3: Few-Shot Demonstrations with Terse Reasoning
+    Provide few-shot examples where the reasoning trace is extremely brief.
+    - **Example:** showing examples where the `Reasoning:` section is just a single short sentence.
+    - **Pros:** Models are good at mimicking the tone and length of few-shot examples.
+    - **Cons:** Needs manually curated, high-quality examples.
+
+    ### Approach 4: Pseudo-code / Shorthand Reasoning
+    Instruct the model to use shorthand or pseudo-code instead of natural language.
+    - **Example:** "Draft the query logic in brief pseudo-code before writing the Cypher query."
+    - **Pros:** Naturally reduces token count while preserving logical steps.
+    - **Cons:** The model must understand the shorthand.
+    """)
+    return
+
+
+@app.cell
+def _(ZERO_SHOT_PROMPT_TEMPLATE, mo):
+    APP1_LENGTH_CONSTRAINT_PROMPT = ZERO_SHOT_PROMPT_TEMPLATE + """
+    ---
+    CRITICAL: Keep your reasoning concise. Limit your reasoning thinking to a maximum of 3 short sentences.
+    """
+
+    APP2_STRUCTURED_REASONING_PROMPT = ZERO_SHOT_PROMPT_TEMPLATE + """
+    ---
+    CRITICAL: You must format your reasoning strictly using the following structure:
+    Entities: [Identify key entities]
+    Relationship: [Identify relationships]
+    Logic: [Brief mapping to cypher]
+    """
+
+    APP3_TERSE_FEW_SHOT_PROMPT = ZERO_SHOT_PROMPT_TEMPLATE + """
+    ---
+    EXAMPLES:
+
+    Question: What is a symptom of asthma?
+    Reasoning: Match 'asthma' to Symptom via HAS_SYMPTOM.
+    <cypher>
+    MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+    WHERE d.name = 'asthma'
+    RETURN s.name
+    </cypher>
+
+    Question: List 5 diseases associated with a cough.
+    Reasoning: Match 'cough' symptom back to Disease, limit 5.
+    <cypher>
+    MATCH (d:Disease)-[:HAS_SYMPTOM]->(s:Symptom)
+    WHERE s.name = 'cough'
+    RETURN d.name
+    LIMIT 5
+    </cypher>
+    ---
+    """
+
+    APP4_PSEUDOCODE_PROMPT = ZERO_SHOT_PROMPT_TEMPLATE + """
+    ---
+    CRITICAL: Draft your reasoning logic purely in brief pseudo-code (no natural language sentences) before writing the Cypher query.
+    """
+
+    md = mo.md("### Defined Prompts for Section 2\n\nPrompts for the 4 approaches have been defined extending the baseline Zero-Shot prompt.")
+
+    mo.vstack([
+        md,
+        mo.md(f'''
+    #### 1. Length Constraint
+    ```
+    {APP1_LENGTH_CONSTRAINT_PROMPT}
+    ```
+        '''),
+        mo.md(f'''
+    #### 2. Structured Reasoning
+    ```
+    {APP2_STRUCTURED_REASONING_PROMPT}
+    ```
+        '''),
+        mo.md(f'''
+    #### 3. Terse Few-Shot
+    ```
+    {APP3_TERSE_FEW_SHOT_PROMPT}
+    ```
+        '''),
+        mo.md(f'''
+    #### 4. Pseudo-code
+    ```
+    {APP4_PSEUDOCODE_PROMPT}
+    ```
+        '''),
+    ])
+    return (
+        APP1_LENGTH_CONSTRAINT_PROMPT,
+        APP2_STRUCTURED_REASONING_PROMPT,
+        APP3_TERSE_FEW_SHOT_PROMPT,
+        APP4_PSEUDOCODE_PROMPT,
+    )
+
+
+@app.cell
+def _(
+    APP1_LENGTH_CONSTRAINT_PROMPT,
+    APP2_STRUCTURED_REASONING_PROMPT,
+    APP3_TERSE_FEW_SHOT_PROMPT,
+    APP4_PSEUDOCODE_PROMPT,
+    evaluator: "ModelEvaluator",
+    questions,
+):
+    section_2_evaluation_tasks = [
+        (APP1_LENGTH_CONSTRAINT_PROMPT, questions),
+        (APP2_STRUCTURED_REASONING_PROMPT, questions),
+        (APP3_TERSE_FEW_SHOT_PROMPT, questions),
+        (APP4_PSEUDOCODE_PROMPT, questions),
+    ]
+
+    section_2_responses = evaluator.call_model(input_data=section_2_evaluation_tasks)
+    return (section_2_responses,)
+
+
+@app.cell
+def _(
+    APP1_LENGTH_CONSTRAINT_PROMPT,
+    APP2_STRUCTURED_REASONING_PROMPT,
+    APP3_TERSE_FEW_SHOT_PROMPT,
+    APP4_PSEUDOCODE_PROMPT,
+    mo,
+    parse_cypher_query,
+    pd,
+    questions,
+    section_2_responses,
+):
+    def _show_section_2_summary():
+        summary_results_s2 = []
+
+        for prompt_template, template_name in [
+            (APP1_LENGTH_CONSTRAINT_PROMPT, "Length Constraint"),
+            (APP2_STRUCTURED_REASONING_PROMPT, "Structured Reasoning"),
+            (APP3_TERSE_FEW_SHOT_PROMPT, "Terse Few-Shot"),
+            (APP4_PSEUDOCODE_PROMPT, "Pseudo-code"),
+        ]:
+            valid_count = 0
+            out_of_context_count = 0
+            invalid_format_count = 0
+            total_reasoning_chars = 0
+            count_with_reasoning = 0
+
+            for question in questions:
+                result = section_2_responses.get((prompt_template, question), {})
+                response_text = result.get("response_text", "")
+                reasoning_content = result.get("reasoning_content", "") or ""
+                context_length_exceeded = result.get("context_length_exceeded", 0)
+
+                if reasoning_content:
+                    total_reasoning_chars += len(reasoning_content)
+                    count_with_reasoning += 1
+
+                parsed_result = parse_cypher_query(response_text)
+                is_valid = "error" not in parsed_result
+
+                if context_length_exceeded == 1:
+                    out_of_context_count += 1
+                elif not is_valid:
+                    invalid_format_count += 1
+                else:
+                    valid_count += 1
+
+            avg_reasoning_len = round(total_reasoning_chars / count_with_reasoning) if count_with_reasoning > 0 else 0
+
+            summary_results_s2.append({
+                "Strategy": template_name,
+                "Valid %": f"{(valid_count / len(questions)) * 100:.1f}%",
+                "Out of Context": out_of_context_count,
+                "Invalid Format": invalid_format_count,
+                "Avg Reasoning Length (chars)": avg_reasoning_len
+            })
+
+        summary_df_s2 = pd.DataFrame(summary_results_s2)
+
+        summary_df_s2['Valid_float'] = summary_df_s2['Valid %'].str.rstrip('%').astype(float)
+        best_overall = summary_df_s2.sort_values(by=['Valid_float', 'Avg Reasoning Length (chars)'], ascending=[False, True]).iloc[0]
+        summary_df_s2 = summary_df_s2.drop(columns=['Valid_float'])
+
+        return mo.vstack([
+            mo.md("## Section 2: Reasoning Efficiency Results"),
+            mo.md("Evaluating the impact of different approaches on reasoning length and query validity."),
+            summary_df_s2,
+            mo.md(f"**Conclusion:** The **{best_overall['Strategy']}** approach offers the best trade-off, achieving {best_overall['Valid %']} validity with an average reasoning length of {best_overall['Avg Reasoning Length (chars)']} characters.")
+        ])
+
+    _show_section_2_summary()
+    return
+
+
 if __name__ == "__main__":
     app.run()

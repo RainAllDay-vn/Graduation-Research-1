@@ -312,19 +312,43 @@ class ModelEvaluator:
             return (sp, q), self.call_model_single(sp, q, force_refresh=force_refresh)
 
         results = {}
-        # ThreadPoolExecutor to run API calls concurrently
-        with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            futures = []
-            for system_prompt, user_prompts in input_data:
-                for user_prompt in user_prompts:
-                    futures.append(executor.submit(process_question, system_prompt, user_prompt))
+        
+        all_requests = []
+        for system_prompt, user_prompts in input_data:
+            for user_prompt in user_prompts:
+                all_requests.append((system_prompt, user_prompt))
+                
+        if not all_requests:
+            return results
             
-            for future in as_completed(futures):
-                try:
-                    (sp, q), result = future.result()
-                    results[(sp, q)] = result
-                except Exception as e:
-                    logger.error(f"Error processing question: {e}")
+        # Try the first request to fail fast if there's an issue (e.g., connection error)
+        try:
+            first_sp, first_q = all_requests[0]
+            logger.info("Trying first request to verify connection...")
+            _, first_res = process_question(first_sp, first_q)
+            results[(first_sp, first_q)] = first_res
+            
+            if not first_res:
+                logger.error("First request failed (returned empty). Aborting remaining evaluation.")
+                return results
+                
+        except Exception as e:
+             logger.error(f"Error processing first request, aborting: {e}")
+             return results
+
+        if len(all_requests) > 1:
+            # ThreadPoolExecutor to run API calls concurrently
+            with ThreadPoolExecutor(max_workers=self.workers) as executor:
+                futures = []
+                for sp, q in all_requests[1:]:
+                    futures.append(executor.submit(process_question, sp, q))
+                
+                for future in as_completed(futures):
+                    try:
+                        (sp, q), result = future.result()
+                        results[(sp, q)] = result
+                    except Exception as e:
+                        logger.error(f"Error processing question: {e}")
 
         return results
         
