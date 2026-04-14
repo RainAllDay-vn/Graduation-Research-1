@@ -35,8 +35,9 @@ def _(mo):
 def _(pd):
     dataset_path = "dataset/medquad/data.parquet"
     evaluation_df = pd.read_parquet(dataset_path).sample(100, random_state=42)[['question', 'answer']]
+    questions = evaluation_df['question']
     evaluation_df.head(10)
-    return (evaluation_df,)
+    return (questions,)
 
 
 @app.cell
@@ -150,14 +151,24 @@ def _(mo, re):
         re.DOTALL | re.MULTILINE
     )
 
-    def parse_cypher_query(query: str):
+    def parse_cypher_query(response: str):
         """
         Parses a Cypher query using the canonical structure regex.
-        Returns a dictionary of parts if matched, or None if invalid.
+        Returns a dictionary of parts if matched, or a dictionary with an "error" key if invalid.
         """
+
+        if response is None:
+            return {"error": "Response is None"}
+
+        cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
+        query = cypher_pattern.search(response.strip())
+        if not query:
+            return {"error": "No <cypher> tags found"}
+        query = query.group(1)
+
         match = CYPHER_PARSER_REGEX.search(query.strip())
         if not match:
-            return None
+            return {"error": "Regex structure mismatch (canonical order ignored)"}
 
         return {k: v.strip() if v else None for k, v in match.groupdict().items()}
 
@@ -269,25 +280,30 @@ def _(mo):
 def _(
     FEW_SHOT_PROMPT_TEMPLATE,
     ZERO_SHOT_PROMPT_TEMPLATE,
-    evaluation_df,
     evaluator: "ModelEvaluator",
+    questions,
+):
+    section_1_evaluation_tasks = [
+        (ZERO_SHOT_PROMPT_TEMPLATE, questions),
+        (FEW_SHOT_PROMPT_TEMPLATE, questions),
+    ]
+
+    # Use the correct keyword argument 'input_data'
+    section_1_responses = evaluator.call_model(input_data=section_1_evaluation_tasks)
+    return (section_1_responses,)
+
+
+@app.cell
+def _(
+    FEW_SHOT_PROMPT_TEMPLATE,
+    ZERO_SHOT_PROMPT_TEMPLATE,
     mo,
     parse_cypher_query,
     pd,
-    re,
+    questions,
+    section_1_responses,
 ):
-    def _run_evaluation():
-        cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
-
-        questions = evaluation_df['question'].tolist()
-        evaluation_tasks = [
-            (ZERO_SHOT_PROMPT_TEMPLATE, questions),
-            (FEW_SHOT_PROMPT_TEMPLATE, questions),
-        ]
-
-        # Use the correct keyword argument 'input_data'
-        responses = evaluator.call_model(input_data=evaluation_tasks)
-
+    def _show_summary():
         summary_results = []
         example_sections = []
 
@@ -301,29 +317,19 @@ def _(
 
             for question in questions:
                 # responses is a dict[(system_prompt, question), dict]
-                result = responses.get((prompt_template, question), {})
+                result = section_1_responses.get((prompt_template, question), {})
                 response_text = result.get("response_text", "")
 
-                # Extract query from <cypher> tags
-                cypher_match = cypher_pattern.search(response_text if response_text else "")
+                parsed_result = parse_cypher_query(response_text)
+                is_valid = "error" not in parsed_result
 
-                is_valid = False
-                query_display = ""
-                error_msg = ""
-
-                if cypher_match:
-                    query = cypher_match.group(1).strip()
-                    # Validate structure using the parser defined earlier
-                    if parse_cypher_query(query) is not None:
-                        valid_structure_count += 1
-                        is_valid = True
-                        query_display = query
-                    else:
-                        query_display = query
-                        error_msg = "Regex structure mismatch (canonical order ignored)"
+                if is_valid:
+                    valid_structure_count += 1
+                    query_display = response_text
+                    error_msg = None
                 else:
-                    query_display = (response_text[:200] + "...") if response_text else "[Empty Response]"
-                    error_msg = "Missing <cypher> tags"
+                    query_display = response_text
+                    error_msg = parsed_result.get("error", "Unknown parsing error")
 
                 # Collect examples
                 if is_valid:
@@ -343,7 +349,7 @@ def _(
             # Format examples for this strategy
             valid_md = "\n".join([f"**Q:** {ex['question']}\n```cypher\n{ex['query']}\n```" for ex in valid_examples])
             invalid_md = "\n".join([f"**Q:** {ex['question']}\n**Issue:** {ex['error']}\n```\n{ex['query']}\n```" for ex in invalid_examples])
-        
+
             example_sections.append(
                 mo.md(f"""
     ### {template_name} Examples
@@ -381,7 +387,7 @@ def _(
             example_sections[0]
         ])
 
-    _run_evaluation()
+    _show_summary()
     return
 
 
