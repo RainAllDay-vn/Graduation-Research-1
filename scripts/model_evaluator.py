@@ -1,19 +1,14 @@
 from litellm import ModelResponse
-import json
 import logging
 import os
 import hashlib
-import re
 import argparse
 import sqlite3
-import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Optional, cast
+from dotenv import load_dotenv
+from typing import Any, Optional
 
 import litellm
-from dotenv import load_dotenv
-
-load_dotenv()
 
 litellm.request_timeout = None  # No timeout for requests
 
@@ -32,11 +27,11 @@ class ModelEvaluator:
     def __init__(
         self, 
         model_name: str, 
-        api_key: str, 
+        api_key: Optional[str] = None, 
         api_base: Optional[str] = None, 
         provider: Optional[str] = None, 
-        db_path: str = "cache/cache.db", 
-        workers: int = 8,
+        db_path: Optional[str] = None, 
+        workers: Optional[int] = None,
         logprobs: bool = False, 
         top_logprobs: int = 5, 
         include_reasoning: bool = True
@@ -45,16 +40,33 @@ class ModelEvaluator:
         """
         Initializes the ModelEvaluator with model details and a database path.
         """
+        load_dotenv()
         self.model_name = model_name
-        self.api_key = api_key
-        self.api_base = api_base
-        self.provider = provider
-        self.db_path = db_path
-        self.workers = workers
+        self.api_key = api_key or os.environ.get("LITELLM_API_KEY")
+        self.api_base = api_base or os.environ.get("LITELLM_API_URL")
+        self.provider = provider or os.environ.get("LITELLM_PROVIDER")
+        self.db_path = db_path or os.environ.get("LITELLM_CACHE_PATH", "cache/cache.db")
+        
+        # Resolve workers from arg, then env, then default
+        env_workers = os.environ.get("LITELLM_WORKER")
+        self.workers = workers if workers is not None else (int(env_workers) if env_workers else 8)
+
         self.logprobs = logprobs
         self.top_logprobs = min(top_logprobs, 5)
         self.include_reasoning = include_reasoning
         self._init_db()
+        
+        logger.info(
+            f"ModelEvaluator initialized with Configuration:\n"
+            f"  Model Name:         {self.model_name}\n"
+            f"  API Key:            {'HIDDEN' if self.api_key else 'None'}\n"
+            f"  API Base:           {self.api_base}\n"
+            f"  Provider:           {self.provider}\n"
+            f"  DB Path:            {self.db_path}\n"
+            f"  Workers:            {self.workers}\n"
+            f"  Logprobs:           {self.logprobs} (Top {self.top_logprobs})\n"
+            f"  Include Reasoning:  {self.include_reasoning}"
+        )
 
     def _init_db(self):
         """Initializes the SQLite database folder."""
@@ -80,6 +92,7 @@ class ModelEvaluator:
                     "question": "TEXT",
                     "include_reasoning": "INTEGER",
                     "response_text": "TEXT",
+                    "reasoning_content": "TEXT",
                     "token_1": "TEXT",
                     "token_2": "TEXT",
                     "token_3": "TEXT",
@@ -127,10 +140,10 @@ class ModelEvaluator:
                         
                         missing = required_cols - existing_cols
                         if missing:
-                            raise RuntimeError(
-                                f"Schema mismatch in table '{table_name}' at {self.db_path}. "
-                                f"Missing: {missing}. Manual migration required."
-                            )
+                            logger.info(f"Migration: Adding missing columns {missing} to table {table_name}")
+                            for col in missing:
+                                dtype = config["columns"][col]
+                                cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {dtype}")
 
         except sqlite3.Error as e:
             raise RuntimeError(f"Database error during initialization: {e}")
@@ -154,6 +167,7 @@ class ModelEvaluator:
                 
                 choice = response.choices[0]
                 response_text = choice.message.content
+                reasoning_content = getattr(choice.message, "reasoning_content", None)
                 finish_reason = getattr(choice, "finish_reason", "")
                 context_length_exceeded = 1 if finish_reason == "length" else 0
                 
@@ -173,12 +187,12 @@ class ModelEvaluator:
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO requests 
-                    (model_name, system_prompt_id, question, include_reasoning, response_text, 
+                    (model_name, system_prompt_id, question, include_reasoning, response_text, reasoning_content,
                      token_1, token_2, token_3, token_4, token_5,
                      logprob_1, logprob_2, logprob_3, logprob_4, logprob_5, context_length_exceeded)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text,
+                    (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text, reasoning_content,
                      tokens[0], tokens[1], tokens[2], tokens[3], tokens[4],
                      lps[0], lps[1], lps[2], lps[3], lps[4], context_length_exceeded)
                 )
@@ -198,7 +212,7 @@ class ModelEvaluator:
                 cursor = conn.cursor()
                 cursor.execute(
                     """
-                    SELECT response_text, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT response_text, reasoning_content, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
                     FROM requests 
                     WHERE model_name=? AND system_prompt_id=? AND question=? AND include_reasoning=?
                     """,
@@ -228,7 +242,7 @@ class ModelEvaluator:
                 
                 placeholders = ','.join(['?'] * len(questions))
                 query = f"""
-                    SELECT model_name, question, response_text, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
+                    SELECT model_name, question, response_text, reasoning_content, context_length_exceeded, token_1, token_2, token_3, token_4, token_5, logprob_1, logprob_2, logprob_3, logprob_4, logprob_5
                     FROM requests 
                     WHERE system_prompt_id=? AND include_reasoning=? AND question IN ({placeholders})
                 """
@@ -262,6 +276,8 @@ class ModelEvaluator:
         if self.logprobs:
             kwargs["logprobs"] = True
             kwargs["top_logprobs"] = self.top_logprobs
+        if self.include_reasoning:
+            kwargs["include_reasoning"] = True
             
         model_id = self.model_name
         if self.provider and not model_id.startswith(f"{self.provider}/"):
@@ -310,9 +326,9 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gemini/gemini-2.5-flash", help="Model name (litellm format)")
     parser.add_argument("--api-key", type=str, help="API key for the model")
     parser.add_argument("--force", action="store_true", help="Force refresh cache and call AI")
-    parser.add_argument("--db", type=str, default=os.environ.get("LITELLM_CACHE_PATH", "cache/cache.db"), help="Path to sqlite cache database")
-    parser.add_argument("--workers", type=int, default=int(os.environ.get("LITELLM_WORKER", 5)), help="Number of parallel workers for API calls")
-    parser.add_argument("--api-base", type=str, default=os.environ.get("LITELLM_API_URL"), help="Base URL for the model API")
+    parser.add_argument("--db", type=str, help="Path to sqlite cache database (Default from LITELLM_CACHE_PATH or cache/cache.db)")
+    parser.add_argument("--workers", type=int, help="Number of parallel workers (Default from LITELLM_WORKER or 8)")
+    parser.add_argument("--api-base", type=str, help="Base URL for the model API (Default from LITELLM_API_URL)")
     parser.add_argument("--provider", type=str, help="Provider format for the model (e.g., openai, anthropic)")
     parser.add_argument("--logprobs", action="store_true", help="Request log probabilities from the model")
     parser.add_argument("--top-logprobs", type=int, default=5, help="Number of top log probabilities to return (if logprobs enriched)")
@@ -322,7 +338,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Mock execution for demonstration using dummy queries
-    api_key = args.api_key or os.environ.get("OPENAI_API_KEY", os.environ.get("GEMINI_API_KEY", "dummy_key"))
+    # Key resolution is handled inside ModelEvaluator.__init__
+    api_key = args.api_key
     
     evaluator = ModelEvaluator(
         model_name=args.model,

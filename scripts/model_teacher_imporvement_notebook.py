@@ -46,8 +46,7 @@ def _(ModelEvaluator, os):
 
     evaluator: ModelEvaluator = ModelEvaluator(
         model_name="Qwen/Qwen3.5-4B", 
-        api_key=os.getenv("LITELLM_API_KEY", ""),
-        workers=64
+        api_key=os.getenv("LITELLM_API_KEY", "")
     )
     return (evaluator,)
 
@@ -259,7 +258,7 @@ def _(ZERO_SHOT_PROMPT_TEMPLATE, mo):
     {FEW_SHOT_PROMPT_TEMPLATE}
     ```
     ''')
-    return
+    return (FEW_SHOT_PROMPT_TEMPLATE,)
 
 
 @app.cell
@@ -271,28 +270,36 @@ def _(mo):
 
 
 @app.cell
-def _(evaluation_df, evaluator, FEW_SHOT_PROMPT_TEMPLATE, parse_cypher_query, mo, re, pd):
+def _(
+    FEW_SHOT_PROMPT_TEMPLATE,
+    evaluation_df,
+    evaluator,
+    mo,
+    parse_cypher_query,
+    pd,
+    re,
+):
     def _run_evaluation():
         _cypher_pattern = re.compile(r"<cypher>(.*?)</cypher>", re.DOTALL | re.IGNORECASE)
-        
+
         _questions = evaluation_df['question'].tolist()
         _input = [
             (FEW_SHOT_PROMPT_TEMPLATE.replace("{{question}}", q), q) 
             for q in _questions
         ]
-        
+
         evaluator.call_model(_input)
-        
+
         _cached_responses = evaluator.fetch_all_cached_responses(FEW_SHOT_PROMPT_TEMPLATE, _questions, evaluator.include_reasoning)
-        
+
         _results = []
         for _q in _questions:
             _response = next((r for r in _cached_responses if r.get('question') == _q), {})
             _response_text = _response.get('response_text', '')
-            
+
             _cypher_match = _cypher_pattern.search(_response_text)
             _extracted_cypher = _cypher_match.group(1).strip() if _cypher_match else ''
-            
+
             if _extracted_cypher:
                 _parsed = parse_cypher_query(_extracted_cypher)
                 if _parsed:
@@ -315,15 +322,15 @@ def _(evaluation_df, evaluator, FEW_SHOT_PROMPT_TEMPLATE, parse_cypher_query, mo
                     'status': 'no_cypher_tag',
                     'response_preview': _response_text[:100],
                 })
-        
+
         _results_df = pd.DataFrame(_results)
         _status_counts = _results_df['status'].value_counts()
-        
+
         _parsed_count = _status_counts.get('parsed', 0)
         _invalid_count = _status_counts.get('invalid_structure', 0)
         _no_tag_count = _status_counts.get('no_cypher_tag', 0)
         _total = len(_results_df)
-        
+
         return mo.vstack([
             mo.md(f"### Evaluation Results ({_total} questions)"),
             mo.md(f"- **Successfully Parsed**: {_parsed_count} ({_parsed_count/_total*100:.1f}%)"),
@@ -332,7 +339,7 @@ def _(evaluation_df, evaluator, FEW_SHOT_PROMPT_TEMPLATE, parse_cypher_query, mo
             mo.md("#### Sample Results:"),
             _results_df.head(10)
         ])
-    
+
     _run_evaluation()
     return
 
