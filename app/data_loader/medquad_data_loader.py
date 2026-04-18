@@ -1,12 +1,11 @@
 import os
-import pandas as pd
 from typing import Optional
+
+import pandas as pd
 from app.data_loader.contract import DataLoaderContract
 
 class MedquadDataLoader(DataLoaderContract):
-    def __init__(self, 
-        dataset_path: Optional[str] = None
-    ):
+    def __init__(self, dataset_path: Optional[str] = None):
         if dataset_path is None:
             dataset_path = os.path.join('dataset', 'medquad', 'test.csv')
 
@@ -25,4 +24,3 @@ class MedquadDataLoader(DataLoaderContract):
             dataset.append((question, answer))
 
         return dataset
-        
