@@ -29,7 +29,6 @@ class KnowledgeGraph:
         self.driver = GraphDatabase.driver(self.uri, auth=(self.user, self.password))
         try:
             self.driver.verify_connectivity()
-            self._setup_metadata_cache()
         except Exception as e:
             self.driver.close()
             raise RuntimeError(f"Neo4j connection could not be established. Error: {e}")
@@ -50,7 +49,6 @@ class KnowledgeGraph:
         try:
             loader: DataLoader = importlib.import_module(module_path).get_loader(self.driver, dataset_path)
             loader.load()
-            self._setup_metadata_cache()
         except ImportError as e:
             raise ValueError(f"No data loader found for dataset '{dataset_name}' (expected at {module_path}). Error: {e}")
         
@@ -99,101 +97,23 @@ class KnowledgeGraph:
                 stats['entity_concept_is_a_avg'] = 0.0
             
         return stats
-    
-    def _setup_metadata_cache(self):
-        """Initializes the metadata cache node and installs the APOC trigger."""
-        setup_query = """
-        MERGE (m:GraphMetadata {id: 'singleton'})
-        ON CREATE SET m.is_stale = true
-        """
-        # APOC trigger to mark cache as stale when data changes
-        trigger_query = """
-        CALL apoc.trigger.install(
-            'neo4j',
-            'mark_metadata_stale',
-            "UNWIND $createdNodes + $deletedNodes + $createdRelationships + $deletedRelationships AS x
-             MATCH (m:GraphMetadata {id: 'singleton'})
-             SET m.is_stale = true",
-            {phase: 'afterAsync'}
-        )
-        """
-        with self.driver.session() as session:
-            session.run(setup_query)
-            try:
-                session.run(trigger_query)
-            except Exception as e:
-                # Trigger might already exist or APOC might be restricted
-                print(f"Warning: Could not install APOC trigger: {e}")
 
-    def _ensure_fresh_metadata(self):
-        """Checks if metadata is stale and recomputes if necessary."""
-        with self.driver.session() as session:
-            result = session.run("MATCH (m:GraphMetadata {id: 'singleton'}) RETURN m.is_stale AS is_stale").single()
-            if not result or result['is_stale']:
-                print("Metadata cache is stale. Recomputing...")
-                self._recompute_and_cache_metadata()
-
-    def _recompute_and_cache_metadata(self):
-        """Performs full scan and updates the cache node."""
-        node_labels = self._fetch_node_labels()
-        rel_labels = self._fetch_relation_labels()
-        entity_mappings = self._fetch_entity_concept_mappings()
-        concept_rels = self._fetch_relation_labels_between_concepts()
-
-        # Serialize dicts for Neo4j storage
-        # Note: JSON keys must be strings, so we join tuple keys
-        serialized_concept_rels = {f"{k[0]}|{k[1]}": v for k, v in concept_rels.items()}
-
-        query = """
-        MATCH (m:GraphMetadata {id: 'singleton'})
-        SET m.node_labels = $node_labels,
-            m.relation_labels = $rel_labels,
-            m.entity_concept_mappings = $entity_mappings,
-            m.concept_relation_labels = $concept_rels,
-            m.is_stale = false,
-            m.last_updated = datetime()
-        """
-        with self.driver.session() as session:
-            session.run(query, 
-                node_labels=node_labels,
-                rel_labels=rel_labels,
-                entity_mappings=json.dumps(entity_mappings),
-                concept_rels=json.dumps(serialized_concept_rels)
-            )
-
-    def _fetch_node_labels(self) -> list[str]:
+    def get_node_labels(self) -> list[str]:
         query = "CALL db.labels()"
         with self.driver.session() as session:
             result = session.run(query)
             return [record[0] for record in result]
 
-    def _fetch_relation_labels(self) -> list[str]:
+    def get_relation_labels(self) -> list[str]:
         query = "CALL db.relationshipTypes()"
         with self.driver.session() as session:
             result = session.run(query)
             return [record[0] for record in result]
 
-    def _fetch_entity_concept_mappings(self) -> dict[str, list[str]]:
+    def get_relation_labels_between_concepts(self) -> dict[tuple[str, str], list[str]]:
         query = """
-        MATCH (e:Entity)-[:IS_A]->(c:Concept)
-        RETURN e.name AS entity, c.name AS concept
-        """
-        mappings = {}
-        with self.driver.session() as session:
-            result = session.run(query)
-            for record in result:
-                entity = record['entity']
-                concept = record['concept']
-                if entity not in mappings:
-                    mappings[entity] = []
-                mappings[entity].append(concept)
-        return mappings
-
-    def _fetch_relation_labels_between_concepts(self) -> dict[tuple[str, str], list[str]]:
-        query = """
-        MATCH (c1:Concept)-[r]-(c2:Concept)
-        WHERE type(r) <> 'IS_A'
-        RETURN DISTINCT c1.name AS c1, c2.name AS c2, type(r) AS rel
+        MATCH (c1:Concept)-[r]->(c2:Concept)
+        RETURN c1.name AS c1, c2.name AS c2, type(r) AS rel
         """
         mappings = {}
         with self.driver.session() as session:
@@ -204,30 +124,6 @@ class KnowledgeGraph:
                     mappings[key] = []
                 mappings[key].append(record['rel'])
         return mappings
-
-    def get_node_labels_list(self) -> list[str]:
-        self._ensure_fresh_metadata()
-        with self.driver.session() as session:
-            return session.run("MATCH (m:GraphMetadata {id: 'singleton'}) RETURN m.node_labels").single()[0]
-
-    def get_relation_labels_list(self) -> list[str]:
-        self._ensure_fresh_metadata()
-        with self.driver.session() as session:
-            return session.run("MATCH (m:GraphMetadata {id: 'singleton'}) RETURN m.relation_labels").single()[0]
-
-    def get_entity_concept_mappings(self) -> dict[str, list[str]]:
-        self._ensure_fresh_metadata()
-        with self.driver.session() as session:
-            data = session.run("MATCH (m:GraphMetadata {id: 'singleton'}) RETURN m.entity_concept_mappings").single()[0]
-            return json.loads(data)
-
-    def get_relation_labels_between_concepts(self) -> dict[tuple[str, str], list[str]]:
-        self._ensure_fresh_metadata()
-        with self.driver.session() as session:
-            data = session.run("MATCH (m:GraphMetadata {id: 'singleton'}) RETURN m.concept_relation_labels").single()[0]
-            raw_dict = json.loads(data)
-            # Reconstruct tuple keys
-            return {tuple(k.split('|')): v for k, v in raw_dict.items()}
     
     def get_random_entity(self) -> Entity:
         query = """

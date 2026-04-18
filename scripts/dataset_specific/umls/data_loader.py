@@ -290,7 +290,7 @@ class UmlsDataLoader(DataLoader):
             
         query = """
         UNWIND $batch as item
-        CREATE (c:Entity:Base {id: item.id, name: item.name})
+        CREATE (c:Base:Entity {id: item.id, name: item.name})
         """
         self._insert_batch(list(entities_map.values()), query)
 
@@ -302,45 +302,59 @@ class UmlsDataLoader(DataLoader):
         target_cols = ['TUI', 'STY']
         for df in self.load_semantic_types(chunksize=1_000_000, columns=target_cols):
             for row in df.itertuples(index=False):
-                tui = row[0] # TUI
-                sty = row[1] # STY
+                tui, sty = row
                 if tui in concepts_map: continue
-                concept = {
+                concepts_map[tui] = {
                     'id': tui,
-                    'name': sty
+                    'name': sty,
+                    'label': to_screaming_snake_case(sty)
                 }
-                concepts_map[tui] = concept
             progress += len(df)
             print(f'Progress: {progress} rows')
             
         query = """
         UNWIND $batch as item
-        CREATE (c:Concept:Base {id: item.id, name: item.name})
+        CALL apoc.create.node(['Base', 'Concept', item.label], {id: item.id, name: item.name})
+        YIELD node
+        RETURN count(node)
         """
         self._insert_batch(list(concepts_map.values()), query)
 
     def _insert_entity_concept_relations(self):
         print("Inserting entity IS_A relations...")
 
-        relation_map = set()
+        query = """
+        MATCH (n:Base:Entity) RETURN n.id
+        """
+        with self.driver.session() as session:
+            result = session.run(query)
+            cui_set = set([record['n.id'] for record in result])
+
         progress = 0
-        target_cols = ['CUI', 'TUI']
+        data = []
+        target_cols = ['CUI', 'TUI', 'STY']
         for df in self.load_semantic_types(chunksize=1_000_000, columns=target_cols):
             for row in df.itertuples(index=False): 
-                cui = row[0] # CUI
-                tui = row[1] # TUI
-                if (cui, tui) in relation_map: continue
-                relation_map.add((cui, tui))
+                cui, tui, sty = row
+                if cui not in cui_set: continue
+                data.append({
+                    'child_id': cui, 
+                    'parent_id': tui, 
+                    'label': to_screaming_snake_case(sty)
+                })
             progress += len(df)
             print(f'Progress: {progress} rows')
-                
-        data = [{'child_id': cui, 'parent_id': tui} for cui, tui in relation_map]
-                
+                                
         query = """
         UNWIND $batch as item
-        MATCH (child:Base {id: item.child_id})
-        MATCH (parent:Base {id: item.parent_id})
+        MATCH (child:Base:Entity {id: item.child_id})
+        MATCH (parent:Base:Concept {id: item.parent_id})
+
         CREATE (child)-[:IS_A]->(parent)
+
+        WITH child, item
+        CALL apoc.create.addLabels(child, [item.label]) YIELD node
+        RETURN count(node)
         """
         self._insert_batch(data, query)
 
@@ -428,7 +442,7 @@ class UmlsDataLoader(DataLoader):
         """
         self._insert_batch(data, query)
 
-    def _insert_concept_concept_relations(self):
+    def _insert_concept_to_concept_relations(self):
         print("Inserting concept-to-concept relationships...")
         target_columns = ['STY/RL1', 'RL', 'STY/RL2']
         df = self.load_semantic_network_relation_structure(columns=target_columns)
