@@ -169,9 +169,38 @@ class ModelProvider:
         """Returns a deterministic hash ID for the system prompt."""
         return hashlib.sha256(system_prompt.encode('utf-8')).hexdigest()
 
-    def _cache_response(self, system_prompt: str, question: str, response: ModelResponse):
+    def _resolve_previous_answer(self, previous_answer_text: Optional[str], dataset: Optional[str], question: Optional[str]) -> Optional[int]:
+        """Resolves the request_id of a previous answer based on its text, dataset, and question."""
+        if not previous_answer_text:
+            return None
+        
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT request_id FROM requests WHERE response_text=? AND dataset=? AND question=? ORDER BY created_at DESC LIMIT 1",
+                    (previous_answer_text, dataset, question)
+                )
+                row = cursor.fetchone()
+                return row[0] if row else None
+        except sqlite3.Error as e:
+            logger.error(f"Failed to resolve previous answer: {e}")
+            return None
+
+    def _cache_response(
+        self, 
+        system_prompt: str, 
+        user_prompt: str, 
+        response: ModelResponse, 
+        dataset: Optional[str] = None, 
+        question: Optional[str] = None, 
+        type: Optional[str] = None, 
+        correctionPrompt: Optional[str] = None, 
+        previous_answer_text: Optional[str] = None
+    ):
         """Stores a response in the cache."""
         system_prompt_id = self._get_system_prompt_id(system_prompt)
+        previous_answer_id = self._resolve_previous_answer(previous_answer_text, dataset, question)
         
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -187,16 +216,27 @@ class ModelProvider:
                 finish_reason = getattr(choice, "finish_reason", "")
                 context_length_exceeded = 1 if finish_reason == "length" else 0
                 
-                # Insert or Replace in requests table
-                # Note: We use INSERT OR REPLACE which triggers DELETE on UNIQUE conflict if ON CONFLICT clause is not specified?
-                # Actually, SQLite's INSERT OR REPLACE will delete the old row, and since we have ON DELETE CASCADE, it will delete old logprobs.
+                # Insert in requests table
                 cursor.execute(
                     """
-                    INSERT OR REPLACE INTO requests 
-                    (model_name, system_prompt_id, user_prompt, include_reasoning, response_text, reasoning_content, context_length_exceeded)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO requests 
+                    (model_name, system_prompt_id, user_prompt, dataset, question, type, correctionPrompt, previousAnswer, include_reasoning, response_text, reasoning_content, context_length_exceeded)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (self.model_name, system_prompt_id, question, int(self.include_reasoning), response_text, reasoning_content, context_length_exceeded)
+                    (
+                        self.model_name, 
+                        system_prompt_id, 
+                        user_prompt, 
+                        dataset, 
+                        question, 
+                        type, 
+                        correctionPrompt, 
+                        previous_answer_id, 
+                        int(self.include_reasoning), 
+                        response_text, 
+                        reasoning_content, 
+                        context_length_exceeded
+                    )
                 )
                 
                 request_id = cursor.lastrowid
