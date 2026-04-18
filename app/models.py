@@ -43,7 +43,7 @@ class CachedModelRequest(NamedTuple):
     context_length_exceeded: bool = False
     created_at: datetime
 
-    def from_request_and_response(request: ModelRequest, response: ModelResponse) -> "CachedModelRequest":
+    def from_request_and_response(self, request: ModelRequest, response: ModelResponse) -> "CachedModelRequest":
         return CachedModelRequest(
             model_name=request.model_name,
             dataset=request.dataset,
@@ -58,3 +58,13 @@ class CachedModelRequest(NamedTuple):
             context_length_exceeded=response.context_length_exceeded,
             created_at=datetime.now()
         )
+
+class Concept(NamedTuple):
+    id: str
+    name: str
+    labels: list[str]
+
+class Entity(NamedTuple):
+    id: str
+    name: str
+    labels: list[str]

@@ -25,7 +25,4 @@ class MedquadDataLoader(DataLoaderContract):
             dataset.append((question, answer))
 
         return dataset
-
-    def load_dataset(self) -> list[(str, str)]:
-        raise NotImplementedError("Method not implemented")
         
