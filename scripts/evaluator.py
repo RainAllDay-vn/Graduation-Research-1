@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from scripts.ontology_checker import OntologyChecker
+from ontology_checker import OntologyChecker
 from knowledge_graph import KnowledgeGraph
 from model_provider import ModelProvider, CallModelRequest
 

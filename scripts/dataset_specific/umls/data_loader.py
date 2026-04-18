@@ -211,6 +211,7 @@ class UmlsDataLoader(DataLoader):
         self._insert_concepts()
         self._insert_entity_concept_relations()
         self._insert_entity_to_entity_relations()
+        self._insert_concept_to_concept_relations()
 
     def _clear_database(self):
         print("Clearing database...")
@@ -426,6 +427,42 @@ class UmlsDataLoader(DataLoader):
         CREATE (child)-[:{to_screaming_snake_case(rel)} {{name: item[2]}}]->(parent)
         """
         self._insert_batch(data, query)
+
+    def _insert_concept_concept_relations(self):
+        print("Inserting concept-to-concept relationships...")
+        target_columns = ['STY/RL1', 'RL', 'STY/RL2']
+        df = self.load_semantic_network_relation_structure(columns=target_columns)
+        rl_set = df['RL'].unique()
+        equivalent_map = {}
+        insert_data_map = {}
+
+        for row in df.itertuples(index=False):
+            rl1, _, rl2 = row
+            if rl1 not in rl_set: continue
+            if rl2 not in rl_set: continue
+            if rl1 not in equivalent_map: equivalent_map[rl1] = []
+            if rl2 not in equivalent_map: equivalent_map[rl2] = []
+            equivalent_map[rl1].append(rl2)
+            equivalent_map[rl2].append(rl1)
+        
+        for row in df.itertuples(index=False):
+            sty1, rel, sty2 = row
+            if sty1 in rl_set or sty2 in rl_set: continue
+            if rel not in insert_data_map: insert_data_map[rel] = []
+            insert_data_map[rel].append((sty1, sty2))
+            if rel in equivalent_map:
+                for equivalent_rel in equivalent_map[rel]:
+                    if equivalent_rel not in insert_data_map: insert_data_map[equivalent_rel] = []
+                    insert_data_map[equivalent_rel].append((sty1, sty2))
+
+        for rel, data in insert_data_map.items():
+            query = f"""
+            UNWIND $batch as item
+            MATCH (child:Concept {{name: item[0]}})
+            MATCH (parent:Concept {{name: item[1]}})
+            CREATE (child)-[:{to_screaming_snake_case(rel)}]->(parent)
+            """
+            self._insert_batch(data, query)
 
     def _insert_batch(self, data: list, query: str):
         print(f"Starting to insert {len(data)} rows...")
