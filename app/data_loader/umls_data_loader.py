@@ -1,9 +1,10 @@
 import os
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 import pandas as pd
 from app.data_loader.contract import DataLoaderContract
 from app.models import Entity, Concept
+from app.utils import to_screaming_snake_case
 
 class UMLSDataLoader(DataLoaderContract):
     def __init__(self, dataset_path: Optional[str] = None):
@@ -15,11 +16,28 @@ class UMLSDataLoader(DataLoaderContract):
 
         self.dataset_path = os.path.join(dataset_path, 'extracted', '2025AB')
 
-    def load_concepts(self) -> list[Concept]:
-        pass
+    def load_concepts(self) -> Iterator[Concept]:
+        columns = ['TUI', 'STY']
+        tui_set: set[str] = set()
+        for df in self.load_semantic_types(chunksize=1_000_000, columns=columns):
+            for row in df.itertuples(index=False):
+                tui, sty = row
+                if tui in tui_set:
+                    continue
+                tui_set.add(tui)
+                yield Concept(id=tui, name=sty, labels=[to_screaming_snake_case(sty)])
 
-    def load_entities(self) -> list[Entity]:
-        pass
+    def load_entities(self) -> Iterator[Entity]:
+        columns = ['CUI', 'ISPREF', 'STR']
+        cui_set: set[str] = set()
+        for df in self.load_concept_names(chunksize=1_000_000, columns=columns):
+            for row in df.itertuples(index=False):
+                cui, ispref, name = row
+                if cui in cui_set or ispref == 'N':
+                    continue
+
+                cui_set.add(cui)
+                yield Entity(id=cui, name=name, labels=[to_screaming_snake_case(name)])
 
     def _read_rrf(self,
         file_path: str,
@@ -210,6 +228,22 @@ class UMLSDataLoader(DataLoaderContract):
             columns=columns,
             limit=limit,
             offset=offset
+        )
+
+    def load_concept_names(self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        chunksize: Optional[int] = None,
+        columns: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        """Loads MRCONSO.RRF which contains every concept name (atom) in the Metathesaurus."""
+        file_path = os.path.join(self.dataset_path, 'META', 'MRCONSO.RRF')
+        return self._read_rrf(
+            file_path,
+            limit=limit,
+            offset=offset,
+            chunksize=chunksize,
+            columns=columns
         )
 
     def load_concept_definitions(self,
