@@ -263,23 +263,48 @@ class ModelProvider:
         except sqlite3.Error as e:
             logger.error(f"Failed to cache response: {e}")
 
-    def _fetch_cached_response(self, system_prompt: str, question: str, include_reasoning: bool) -> dict[str, Any]:
+    def _fetch_cached_response(
+        self, 
+        dataset: Optional[str] = None, 
+        question: Optional[str] = None, 
+        type: Optional[str] = None,
+        system_prompt: Optional[str] = None, 
+        user_prompt: Optional[str] = None, 
+        include_reasoning: bool = True
+    ) -> dict[str, Any]:
         """
         Fetches cached model response from the SQLite database.
+        Supports fetching by (dataset, question, type) or (model_name, system_prompt, user_prompt).
         """
-        system_prompt_id = self._get_system_prompt_id(system_prompt)
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT request_id, response_text, reasoning_content, context_length_exceeded
-                    FROM requests 
-                    WHERE model_name=? AND system_prompt_id=? AND user_prompt=? AND include_reasoning=?
-                    """,
-                    (self.model_name, system_prompt_id, question, int(include_reasoning))
-                )
+                
+                if dataset is not None or question is not None:
+                    # Branch A: by dataset and question
+                    cursor.execute(
+                        """
+                        SELECT request_id, response_text, reasoning_content, context_length_exceeded
+                        FROM requests 
+                        WHERE dataset=? AND question=? AND type=? AND include_reasoning=?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
+                        (dataset, question, type, int(include_reasoning))
+                    )
+                else:
+                    # Branch B: by model_name, system_prompt, and user_prompt
+                    system_prompt_id = self._get_system_prompt_id(system_prompt or "")
+                    cursor.execute(
+                        """
+                        SELECT request_id, response_text, reasoning_content, context_length_exceeded
+                        FROM requests 
+                        WHERE model_name=? AND system_prompt_id=? AND user_prompt=? AND include_reasoning=?
+                        ORDER BY created_at DESC LIMIT 1
+                        """,
+                        (self.model_name, system_prompt_id, user_prompt, int(include_reasoning))
+                    )
+                
                 row = cursor.fetchone()
                 if row:
                     result = dict(row)
