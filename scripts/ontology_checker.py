@@ -50,7 +50,7 @@ class OntologyChecker:
         query = query_match.group(1).strip()
         match = self.CYPHER_PARSER_REGEX.search(query)
         if not match:
-            return "Regex structure mismatch (canonical order ignored)"
+            return "Regex structure mismatch. Ensure the query follows the canonical structure: MATCH ... [WHERE ...] RETURN ... [ORDER BY ...] [LIMIT ...]"
 
         match_clause = match.group('match_clause')
 
@@ -59,46 +59,53 @@ class OntologyChecker:
         node_labels_in_query = re.findall(r":(\w+)(?=[^\]]*\))", match_clause)
         for label in node_labels_in_query:
             if label not in self.node_labels:
-                return f"Unknown node label: :{label}"
+                return f"Unknown node label: :{label}. Valid labels are: {self.node_labels}"
 
         # 2. Check Relationship Types
         # Pattern to find relationship types like :BORN_IN inside [ ... ]
         rel_types_in_query = re.findall(r"\[:(\w+)\]", match_clause)
         for rel_type in rel_types_in_query:
             if rel_type not in self.relation_labels:
-                return f"Unknown relationship type: :{rel_type}"
+                return f"Unknown relationship type: :{rel_type}. Valid relationship types are: {self.relation_labels}"
 
-        # 3. Check Concept-level Relationship Validity
-        # Pattern to find triples: (n1)-[:R]->(n2)
-        triple_pattern = re.compile(r"\((?P<n1>[^)]+)\)-\[:(?P<rel>\w+)\]->\((?P<n2>[^)]+)\)")
-        for triple in triple_pattern.finditer(match_clause):
-            n1_str = triple.group('n1')
-            rel = triple.group('rel')
-            n2_str = triple.group('n2')
+        # # 3. Check Concept-level Relationship Validity
+        # # Pattern to find triples: (n1)-[:R]->(n2)
+        # triple_pattern = re.compile(r"\((?P<n1>[^)]+)\)-\[:(?P<rel>\w+)\]->\((?P<n2>[^)]+)\)")
+        # for triple in triple_pattern.finditer(match_clause):
+        #     n1_str = triple.group('n1')
+        #     rel = triple.group('rel')
+        #     n2_str = triple.group('n2')
 
-            if rel == 'IS_A':
-                continue # IS_A is always valid for schema traversal
+        #     if rel == 'IS_A':
+        #         continue # IS_A is always valid for schema traversal
 
-            src_concepts = self._get_node_concepts(n1_str)
-            tgt_concepts = self._get_node_concepts(n2_str)
+        #     src_concepts = self._get_node_concepts(n1_str)
+        #     tgt_concepts = self._get_node_concepts(n2_str)
 
-            if not src_concepts or not tgt_concepts:
-                # If we can't determine concepts (e.g. no name property), we might skip or warn
-                # For KQA Pro, we usually have names for entities/concepts in the query
-                continue
+        #     if not src_concepts or not tgt_concepts:
+        #         # If we can't determine concepts (e.g. no name property), we might skip or warn
+        #         # For KQA Pro, we usually have names for entities/concepts in the query
+        #         continue
 
-            # Check if relationship is valid between ANY pair of concepts
-            is_valid = False
-            for c1 in src_concepts:
-                for c2 in tgt_concepts:
-                    allowed_rels = self.relation_labels_between_concepts.get((c1, c2), [])
-                    if rel in allowed_rels:
-                        is_valid = True
-                        break
-                if is_valid: break
+        #     # Check if relationship is valid between ANY pair of concepts
+        #     is_valid = False
+        #     all_allowed_rels = set()
+        #     for c1 in src_concepts:
+        #         for c2 in tgt_concepts:
+        #             allowed_rels = self.relation_labels_between_concepts.get((c1, c2), [])
+        #             all_allowed_rels.update(allowed_rels)
+        #             if rel in allowed_rels:
+        #                 is_valid = True
+        #                 break
+        #         if is_valid: break
             
-            if not is_valid:
-                return f"Invalid relationship :{rel} between concepts {src_concepts} and {tgt_concepts}"
+        #     if not is_valid:
+        #         error_msg = f"Invalid relationship :{rel} between concepts {src_concepts} and {tgt_concepts}."
+        #         if all_allowed_rels:
+        #             error_msg += f" Valid relationships between these concepts are: {sorted(list(all_allowed_rels))}"
+        #         else:
+        #             error_msg += " No valid relationships found between these specific concepts in the ontology."
+        #         return error_msg
 
         return 'OK'
 

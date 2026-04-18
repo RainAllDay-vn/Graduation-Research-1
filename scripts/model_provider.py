@@ -487,7 +487,7 @@ class ModelProvider:
                     include_reasoning=self.include_reasoning
                 )
                 if cached_response:
-                    return (request.system_prompt, request.user_prompt), cached_response
+                    return request, cached_response
             
             if checker:
                 response = self.call_model_single_with_checker(request, checker)
@@ -507,7 +507,7 @@ class ModelProvider:
                 correctionPrompt=request.correction_prompt,
                 previous_answer_text=request.previous_answer_text
             )
-            return (request, response)
+            return request, response
 
         results = {}
         # Try the first request to fail fast if there's an issue (e.g., connection error)
@@ -535,8 +535,8 @@ class ModelProvider:
                 
                 for future in as_completed(futures):
                     try:
-                        (sys, usr), result = future.result()
-                        results[(sys, usr)] = result
+                        req, result = future.result()
+                        results[req] = result
                     except Exception as e:
                         logger.error(f"Error processing question: {e}")
 
