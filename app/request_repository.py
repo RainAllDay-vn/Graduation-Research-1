@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
-from typing import Optional, List
-from .models import CachedModelRequest, SystemPrompt, UserPromptTemplate
+from typing import Optional
+from app.models import CachedModelRequest, SystemPrompt, UserPromptTemplate
 
 class RequestRepository:
     def __init__(self, db_path: str = "./cache/repository.db"):

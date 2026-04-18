@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import Optional, NamedTuple
 
-
 class SystemPrompt(NamedTuple):
     id: str
     content: str
