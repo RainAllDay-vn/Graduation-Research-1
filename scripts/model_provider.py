@@ -170,6 +170,16 @@ class ModelProvider:
                                 dtype = config["columns"][col]
                                 cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {col} {dtype}")
 
+                # Create indexes to speed up lookups
+                index_queries = [
+                    "CREATE INDEX IF NOT EXISTS idx_requests_metadata ON requests (model_name, dataset, question, type, created_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_requests_prompts ON requests (model_name, system_prompt_id, user_prompt, created_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_requests_resolve_prev ON requests (model_name, dataset, question, created_at DESC)",
+                    "CREATE INDEX IF NOT EXISTS idx_logprobs_request_id ON token_logprobs (request_id, token_position)"
+                ]
+                for query in index_queries:
+                    cursor.execute(query)
+
         except sqlite3.Error as e:
             raise RuntimeError(f"Database error during initialization: {e}")
 
@@ -187,8 +197,8 @@ class ModelProvider:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT request_id FROM requests WHERE response_text=? AND dataset=? AND question=? ORDER BY created_at DESC LIMIT 1",
-                    (previous_answer_text, dataset, question)
+                    "SELECT request_id FROM requests WHERE model_name=? AND response_text=? AND dataset=? AND question=? ORDER BY created_at DESC LIMIT 1",
+                    (self.model_name, previous_answer_text, dataset, question)
                 )
                 row = cursor.fetchone()
                 return row[0] if row else None
@@ -280,8 +290,8 @@ class ModelProvider:
                 cursor = conn.cursor()
                 if request.dataset or request.question:
                     cursor.execute(
-                        "SELECT COUNT(*) FROM requests WHERE dataset=? AND question=?",
-                        (request.dataset, request.question)
+                        "SELECT COUNT(*) FROM requests WHERE model_name=? AND dataset=? AND question=?",
+                        (self.model_name, request.dataset, request.question)
                     )
                 else:
                     cursor.execute(
@@ -317,10 +327,10 @@ class ModelProvider:
                         """
                         SELECT request_id, response_text, reasoning_content, context_length_exceeded
                         FROM requests 
-                        WHERE dataset=? AND question=? AND type=? AND include_reasoning=?
+                        WHERE model_name=? AND dataset=? AND question=? AND type=? AND include_reasoning=?
                         ORDER BY created_at DESC LIMIT 1
                         """,
-                        (dataset, question, type, int(include_reasoning))
+                        (self.model_name, dataset, question, type, int(include_reasoning))
                     )
                 else:
                     # Branch B: by model_name, system_prompt, and user_prompt
@@ -388,7 +398,7 @@ class ModelProvider:
             
         except Exception as e:
             logger.error(f"LiteLLM call failed: {e}")
-            return {}
+            return None
 
     def call_model_single_with_checker(
         self, 
@@ -417,7 +427,9 @@ class ModelProvider:
             try:
                 logger.info(f"Calling model {self.model_name} (Attempt {attempt + 1}/{max_retries})...")
                 response: dict[str, Any] = self.call_model_single(request.system_prompt, request.user_prompt)
-                
+                if response is None:
+                    return None
+
                 response_text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
                 
                 # Check validity
@@ -458,7 +470,7 @@ class ModelProvider:
         input_data: list[CallModelRequest], 
         checker_function: Optional[Callable[[str], str]] = None, 
         force_refresh: bool = False
-    ) -> dict[tuple[str, str], dict[str, Any]]:
+    ) -> dict[CallModelRequest, dict[str, Any]]:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
@@ -481,6 +493,9 @@ class ModelProvider:
                 response = self.call_model_single_with_checker(request, checker)
             else:
                 response = self.call_model_single(request.system_prompt, request.user_prompt)
+
+            if response is None:
+                return (request, None)
             
             self._cache_response(
                 system_prompt=request.system_prompt,
@@ -492,23 +507,24 @@ class ModelProvider:
                 correctionPrompt=request.correction_prompt,
                 previous_answer_text=request.previous_answer_text
             )
-            return (request.system_prompt, request.user_prompt), response
+            return (request, response)
 
         results = {}
         # Try the first request to fail fast if there's an issue (e.g., connection error)
         try:
             first_request = input_data[0]
             logger.info("Trying first request to verify connection...")
-            (sys, usr), first_res = process_question(first_request, checker_function)
-            results[(sys, usr)] = first_res
+            _, first_response = process_question(first_request, checker_function)
             
-            if not first_res:
+            if first_response is None:
                 logger.error("First request failed (returned empty). Aborting remaining evaluation.")
                 return results
-                
+            
+            results[first_request] = first_response
+
         except Exception as e:
-             logger.error(f"Error processing first request, aborting: {e}")
-             return results
+            logger.error(f"Error processing first request, aborting: {e}")
+            return results
 
         if len(input_data) > 1:
             # ThreadPoolExecutor to run API calls concurrently
@@ -560,9 +576,21 @@ if __name__ == "__main__":
     )
     
     sample_system_prompt = "You are a helpful AI assistant. Answer accurately."
-    sample_questions = [
-        "What is the capital of France?",
-        "Write a Python script to reverse a string."
+    input_data = [
+        CallModelRequest(
+            system_prompt=sample_system_prompt, 
+            user_prompt="What is the capital of France?", 
+            dataset="sample_dataset", 
+            question="What is the capital of France?", 
+            type="QUESTION_TO_QUERY"
+        ),
+        CallModelRequest(
+            system_prompt=sample_system_prompt, 
+            user_prompt="Write a Python script to reverse a string.", 
+            dataset="sample_dataset", 
+            question="Write a Python script to reverse a string.", 
+            type="QUESTION_TO_QUERY"
+        ),
     ]
     
-    evaluator.call_model(input_data=[(sample_system_prompt, sample_questions)], force_refresh=args.force)
+    evaluator.call_model(input_data=input_data, force_refresh=args.force)
