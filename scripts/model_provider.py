@@ -89,8 +89,13 @@ class ModelProvider:
                 "columns": {
                     "request_id": "INTEGER PRIMARY KEY AUTOINCREMENT",
                     "model_name": "TEXT",
+                    "dataset": "TEXT",
+                    "question": "TEXT",
+                    "type": "TEXT",
                     "system_prompt_id": "TEXT",
                     "user_prompt": "TEXT",
+                    "previousAnswer": "INTEGER",
+                    "correctionPrompt": "TEXT",
                     "include_reasoning": "INTEGER",
                     "response_text": "TEXT",
                     "reasoning_content": "TEXT",
@@ -98,8 +103,10 @@ class ModelProvider:
                     "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                 },
                 "pk": None, # Defined inline above
-                "fk": "FOREIGN KEY(system_prompt_id) REFERENCES system_prompts(system_prompt_id)",
-                "unique": ["model_name", "system_prompt_id", "user_prompt", "include_reasoning"]
+                "fk": [
+                    "FOREIGN KEY(system_prompt_id) REFERENCES system_prompts(system_prompt_id)",
+                    "FOREIGN KEY(previousAnswer) REFERENCES requests(request_id) ON DELETE SET NULL"
+                ]
             },
             "token_logprobs": {
                 "columns": {
@@ -131,7 +138,11 @@ class ModelProvider:
                         if config.get("pk"):
                             constraints.append(f"PRIMARY KEY ({', '.join(config['pk'])})")
                         if config.get("fk"):
-                            constraints.append(config["fk"])
+                            fks = config["fk"]
+                            if isinstance(fks, list):
+                                constraints.extend(fks)
+                            else:
+                                constraints.append(fks)
                         if config.get("unique"):
                             constraints.append(f"UNIQUE ({', '.join(config['unique'])})")
                         
@@ -288,7 +299,7 @@ class ModelProvider:
         self, 
         system_prompt: str, 
         user_prompt: str, 
-        checker: Callable[[str], str], 
+        checker_function: Callable[[str], str], 
         max_retries: int = 3, 
     ) -> dict[str, Any]:
         """
@@ -302,7 +313,7 @@ class ModelProvider:
                 response_text = response.get("choices", [{}])[0].get("message", {}).get("content", "")
                 
                 # Check validity
-                check_result = checker(response_text)
+                check_result = checker_function(response_text)
                 if check_result == "OK":
                     return response
                 
@@ -315,7 +326,7 @@ class ModelProvider:
         logger.error(f"Failed to get a valid response after {max_retries} attempts.")
         return {}
 
-    def call_model(self, input_data: list[tuple[str, str]], checker: Optional[Callable[[str], str]] = None, force_refresh: bool = False) -> dict[tuple[str, str], dict[str, Any]]:
+    def call_model(self, input_data: list[tuple[str, str]], checker_function: Optional[Callable[[str], str]] = None, force_refresh: bool = False) -> dict[tuple[str, str], dict[str, Any]]:
         """
         Evaluates the model's accuracy on a given set of questions.
         """
@@ -338,7 +349,7 @@ class ModelProvider:
         try:
             system_prompt, user_prompt = input_data[0]
             logger.info("Trying first request to verify connection...")
-            _, first_res = process_question(system_prompt, user_prompt, checker)
+            _, first_res = process_question(system_prompt, user_prompt, checker_function)
             results[(system_prompt, user_prompt)] = first_res
             
             if not first_res:
@@ -354,7 +365,7 @@ class ModelProvider:
             with ThreadPoolExecutor(max_workers=self.workers) as executor:
                 futures = []
                 for system_prompt, user_prompt in input_data[1:]:
-                    futures.append(executor.submit(process_question, system_prompt, user_prompt, checker))
+                    futures.append(executor.submit(process_question, system_prompt, user_prompt, checker_function))
                 
                 for future in as_completed(futures):
                     try:
