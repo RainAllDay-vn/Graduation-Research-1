@@ -68,3 +68,9 @@ class Entity(NamedTuple):
     id: str
     name: str
     labels: list[str]
+
+class Relation(NamedTuple):
+    source_id: str
+    target_id: str
+    label: str
+    name: Optional[str] = None

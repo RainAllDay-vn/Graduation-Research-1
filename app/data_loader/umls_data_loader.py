@@ -3,7 +3,7 @@ from typing import Iterator, List, Optional
 
 import pandas as pd
 from app.data_loader.contract import DataLoaderContract
-from app.models import Entity, Concept
+from app.models import Entity, Concept, Relation
 from app.utils import to_screaming_snake_case
 
 class UMLSDataLoader(DataLoaderContract):
@@ -35,9 +35,23 @@ class UMLSDataLoader(DataLoaderContract):
                 cui, ispref, name = row
                 if cui in cui_set or ispref == 'N':
                     continue
-
                 cui_set.add(cui)
-                yield Entity(id=cui, name=name, labels=[to_screaming_snake_case(name)])
+                yield Entity(id=cui, name=name, labels=[])
+
+    def load_entity_isa_concept_relations(self) -> Iterator[Relation]:
+        cui_set: set[str] = set()
+        for df in self.load_concept_names(chunksize=1_000_000, columns=['CUI']):
+            for row in df.itertuples(index=False):
+                cui = row[0]
+                cui_set.add(cui)
+
+        target_cols = ['CUI', 'TUI']
+        for df in self.load_semantic_types(chunksize=1_000_000, columns=target_cols):
+            for row in df.itertuples(index=False):
+                cui, tui = row
+                if cui not in cui_set:
+                    continue
+                yield Relation(source_id=cui, target_id=tui, label='ISA')
 
     def _read_rrf(self,
         file_path: str,
