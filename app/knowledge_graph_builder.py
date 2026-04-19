@@ -35,16 +35,43 @@ class KnowledgeGraphBuilder:
         self._insert_concept_to_concept_relations()
 
     def _clear_database(self) -> None:
-        print("Dropping database...")
-        self.driver.execute_query(
-            f"DROP DATABASE {self.database_name} IF EXISTS",
-            database_v_= "system"
+        # 1. Clear relationships in batches
+        print("Clearing relationships...")
+        rel_cleanup_query = """
+        CALL apoc.periodic.iterate(
+        "MATCH ()-[r]->() RETURN r",
+        "DELETE r",
+        {batchSize: 5000, parallel: false}
         )
-        print("Creating database...")
-        self.driver.execute_query(
-            f"CREATE DATABASE {self.database_name}",
-            database_v_= "system"
+        """
+
+        # 2. Clear nodes in batches
+        print("Clearing nodes...")
+        node_cleanup_query = """
+        CALL apoc.periodic.iterate(
+        "MATCH (n) RETURN n",
+        "DELETE n",
+        {batchSize: 5000, parallel: false}
         )
+        """
+
+        with self.driver.session() as session:
+            session.run(rel_cleanup_query).consume()
+            session.run(node_cleanup_query).consume()
+
+        # Clear schema (constraints and indexes)
+        cleanup_query = "CALL apoc.schema.assert({}, {})"
+        with self.driver.session() as session:
+            session.run(cleanup_query).consume()
+
+        # Verify emptiness
+        with self.driver.session() as session:
+            node_count = session.run("MATCH (n) RETURN count(n) AS count").single()["count"]
+            rel_count = session.run("MATCH ()-[r]->() RETURN count(r) AS count").single()["count"]
+            if node_count > 0 or rel_count > 0:
+                print(f"WARNING: Database not cleared. Nodes: {node_count}, Rels: {rel_count}")
+            else:
+                print("Database cleared successfully.")
 
     def _create_constraints(self) -> None:
         print("Creating constraints...")
@@ -121,10 +148,28 @@ class KnowledgeGraphBuilder:
         CALL apoc.create.relationship(a, item.label, {name: item.name}, b) YIELD rel
         RETURN count(*)
         '''
+
         self._insert_in_batches(query, data)
 
     def _insert_concept_to_concept_relations(self) -> None:
-        pass
+        relations = self.data_loader.load_concept_to_concept_relations()
+        data = (
+            {
+                'source_id': r.source_id, 
+                'target_id': r.target_id,
+                'label': r.label,
+                'name': r.name
+            } for r in relations
+        )
+        query = '''
+        UNWIND $batch as item
+        MATCH (a:BASE {id: item.source_id})
+        MATCH (b:BASE {id: item.target_id})
+        CALL apoc.create.relationship(a, item.label, {name: item.name}, b) YIELD rel
+        RETURN count(*)
+        '''
+
+        self._insert_in_batches(query, data)
 
     def _insert_in_batches(self,
         query: str,

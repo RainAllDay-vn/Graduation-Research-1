@@ -14,7 +14,7 @@ class MedquadDataLoader(DataLoaderContract):
 
         self.dataset_path = dataset_path
 
-    def load_dataset(self) -> list[(str, str)]:
+    def load_dataset(self) -> list[tuple[str, str]]:
         data = pd.read_csv(self.dataset_path)
 
         dataset = []

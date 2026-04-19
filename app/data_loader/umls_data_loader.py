@@ -8,7 +8,7 @@ from app.data_loader.contract import DataLoaderContract
 from app.models import Entity, Concept, Relation
 from app.utils import to_screaming_snake_case
 
-class UMLSDataLoader(DataLoaderContract):
+class UmlsDataLoader(DataLoaderContract):
     def __init__(self, dataset_path: Optional[str] = None):
         if dataset_path is None:
             dataset_path = os.path.join('dataset', 'umls')
@@ -17,6 +17,9 @@ class UMLSDataLoader(DataLoaderContract):
             raise FileNotFoundError(f"Dataset path '{dataset_path}' is not a directory.")
 
         self.dataset_path = os.path.join(dataset_path, 'extracted', '2025AB')
+
+    def load_dataset(self) -> list[tuple[str, str]]:
+        return []
 
     def load_concepts(self) -> Iterator[Concept]:
         columns = ['TUI', 'STY']
@@ -60,10 +63,10 @@ class UMLSDataLoader(DataLoaderContract):
         sorted_file = os.path.join(temp_dir, 'rels_sorted.csv')
 
         inverse_map = {}
-        mrdoc_df = self.load_mrdoc_definitions()
-        mrdoc_df = mrdoc_df[(mrdoc_df['DOCKEY'] == 'REL') & (mrdoc_df['TYPE'] == 'rel_inverse')]
-        mrdoc_df = mrdoc_df[['VALUE', 'EXPL']]
-        for row in mrdoc_df.itertuples(index=False):
+        df = self.load_mrdoc_definitions()
+        df = df[(df['DOCKEY'] == 'REL') & (df['TYPE'] == 'rel_inverse')]
+        df = df[['VALUE', 'EXPL']]
+        for row in df.itertuples(index=False):
             inverse_map[row[0]] = row[1]
 
         print("Phase 1: Streaming relationships to disk...")
@@ -101,6 +104,43 @@ class UMLSDataLoader(DataLoaderContract):
         print("Phase 4: Cleanup...")
         os.remove(raw_file)
         os.remove(sorted_file)
+
+    def load_concept_to_concept_relations(self) -> Iterator[Relation]:
+        columns = ['STY/RL1', 'RL', 'STY/RL2']
+        df = self.load_semantic_network_relation_structure(columns=columns)
+        rl_set = df['RL'].unique()
+        equivalent_map = {}
+
+        for row in df.itertuples(index=False):
+            rl1, _, rl2 = row
+            if rl1 not in rl_set:
+                continue
+            if rl2 not in rl_set:
+                continue
+            if rl1 not in equivalent_map:
+                equivalent_map[rl1] = []
+            if rl2 not in equivalent_map:
+                equivalent_map[rl2] = []
+            equivalent_map[rl1].append(rl2)
+            equivalent_map[rl2].append(rl1)
+
+        for row in df.itertuples(index=False):
+            sty1, rel, sty2 = row
+            if sty1 in rl_set or sty2 in rl_set:
+                continue
+            yield Relation(
+                source_id=sty1,
+                target_id=sty2,
+                label=to_screaming_snake_case(rel)
+            )
+            if rel in equivalent_map:
+                for equivalent_rel in equivalent_map[rel]:
+                    yield Relation(
+                        source_id=sty1,
+                        target_id=sty2,
+                        label=to_screaming_snake_case(equivalent_rel),
+                        name=''
+                    )
 
     def _read_rrf(self,
         file_path: str,
