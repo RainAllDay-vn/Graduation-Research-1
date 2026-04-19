@@ -1,8 +1,9 @@
-from app.models import ModelRequest, ModelResponse
 import os
-import litellm
 import logging
+import litellm
 from dotenv import load_dotenv
+
+from app.models import ModelRequest, ModelResponse
 
 load_dotenv()
 
@@ -11,10 +12,11 @@ litellm.request_timeout = None
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
 
 class LlmClient:
-    def __init__(self, 
-        model_name: str = None, 
-        api_key: str = None, 
-        api_base: str = None, 
+    def __init__(
+        self,
+        model_name: str = None,
+        api_key: str = None,
+        api_base: str = None,
         provider: str = None
     ):
         self.model_name = model_name or os.environ.get("LITELLM_MODEL")
@@ -25,7 +27,7 @@ class LlmClient:
     def call_model(self, request: ModelRequest) -> ModelResponse:
         if request.model_name is None:
             request.model_name = self.model_name
-            
+
         messages = [
             {"role": "system", "content": request.system_prompt},
             {"role": "user", "content": request.user_prompt}
@@ -51,19 +53,18 @@ class LlmClient:
                 api_key=self.api_key,
                 **kwargs
             )
-            
+
             message = response.choices[0].message
             content = message.content or ""
             reasoning = getattr(message, "reasoning_content", None)
             finish_reason = getattr(response.choices[0], "finish_reason", "")
             context_length_exceeded = finish_reason == "length"
-            
+
             return ModelResponse(
                 response=content,
                 reasoning=reasoning,
                 context_length_exceeded=context_length_exceeded
             )
-            
-        except Exception as e:
-            logging.error(f"LiteLLM call failed for model {request.model_name}: {e}")
-            raise
+
+        except litellm.exceptions.APIError as e:
+            logging.error("LiteLLM api call exception for model %s: %s", request.model_name, e)
