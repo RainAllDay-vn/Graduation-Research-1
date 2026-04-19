@@ -1,8 +1,10 @@
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 import pandas as pd
+
 from app.data_loader.contract import DataLoaderContract
+from app.models import Concept, Entity, Relation
 
 class MedquadDataLoader(DataLoaderContract):
     def __init__(self, dataset_path: Optional[str] = None):
@@ -24,3 +26,18 @@ class MedquadDataLoader(DataLoaderContract):
             dataset.append((question, answer))
 
         return dataset
+
+    def load_concepts(self) -> Iterator[Concept]:
+        yield from []
+
+    def load_entities(self) -> Iterator[Entity]:
+        yield from []
+
+    def load_entity_isa_concept_relations(self) -> Iterator[Relation]:
+        yield from []
+
+    def load_entity_to_entity_relations(self) -> Iterator[Relation]:
+        yield from []
+
+    def load_concept_to_concept_relations(self) -> Iterator[Relation]:
+        yield from []
