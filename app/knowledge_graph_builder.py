@@ -83,6 +83,7 @@ class KnowledgeGraphBuilder:
             session.run(query)
 
     def _insert_concepts(self) -> None:
+        print("Inserting concepts...")
         concepts = self.data_loader.load_concepts()
         data = ({
             'id': c.id,
@@ -101,6 +102,7 @@ class KnowledgeGraphBuilder:
         self._insert_in_batches(query, data)
 
     def _insert_entities(self) -> None:
+        print("Inserting entities...")
         entities = self.data_loader.load_entities()
         data = ({'id': e.id, 'name': e.name, 'labels': e.labels} for e in entities)
         query = '''
@@ -115,6 +117,7 @@ class KnowledgeGraphBuilder:
         self._insert_in_batches(query, data)
 
     def _insert_entity_isa_concept_relations(self) -> None:
+        print("Inserting entity-isa-concept relations...")
         relations = self.data_loader.load_entity_isa_concept_relations()
         data = ({
             'source_id': r.source_id, 
@@ -134,6 +137,7 @@ class KnowledgeGraphBuilder:
         self._insert_in_batches(query, data)
 
     def _insert_entity_to_entity_relations(self) -> None:
+        print("Inserting entity-to-entity relations...")
         relations = self.data_loader.load_entity_to_entity_relations()
         data = ({
             'source_id': r.source_id, 
@@ -152,6 +156,7 @@ class KnowledgeGraphBuilder:
         self._insert_in_batches(query, data)
 
     def _insert_concept_to_concept_relations(self) -> None:
+        print("Inserting concept-to-concept relations...")
         relations = self.data_loader.load_concept_to_concept_relations()
         data = (
             {
@@ -177,16 +182,23 @@ class KnowledgeGraphBuilder:
         batch_size: int = 100_000
     ) -> None:
         batch = []
+        progress = 0
         count = 0
         try:
             while True:
                 batch.append(next(data))
                 count += 1
+                progress += 1
+
                 if count >= batch_size:
                     with self.driver.session(database=self.database_name) as session:
                         session.run(query, batch=batch)
                     batch = []
+                    count = 0
+                    print(f"Insertion Progress: {progress} items inserted")
+
         except StopIteration:
             if count > 0:
                 with self.driver.session(database=self.database_name) as session:
                     session.run(query, batch=batch)
+                print(f"Insertion Progress: {progress} items inserted")
