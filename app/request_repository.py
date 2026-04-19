@@ -16,7 +16,7 @@ class RequestRepository:
     def _init_db(self):
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # System Prompt Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS system_prompts (
@@ -25,7 +25,7 @@ class RequestRepository:
                     created_at TIMESTAMP NOT NULL
                 )
             """)
-            
+
             # User Prompt Template Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS user_prompt_templates (
@@ -34,7 +34,7 @@ class RequestRepository:
                     created_at TIMESTAMP NOT NULL
                 )
             """)
-            
+
             # Cached Model Request Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS requests (
@@ -73,7 +73,8 @@ class RequestRepository:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "INSERT OR IGNORE INTO user_prompt_templates (id, content, created_at) VALUES (?, ?, ?)",
+                """INSERT OR IGNORE INTO user_prompt_templates 
+                (id, content, created_at) VALUES (?, ?, ?)""",
                 (template.id, template.content, template.created_at.isoformat())
             )
             conn.commit()
@@ -131,7 +132,8 @@ class RequestRepository:
                     request.system_prompt.id,
                     request.user_prompt_template.id,
                     request.previous_request_id,
-                    request.correction_prompt_template.id if request.correction_prompt_template else None,
+                    request.correction_prompt_template.id
+                        if request.correction_prompt_template else None,
                     request.valiation_result,
                     1 if request.include_reasoning else 0,
                     request.response,
@@ -153,10 +155,10 @@ class RequestRepository:
 
             system_prompt = self.get_system_prompt(row["system_prompt_id"])
             user_prompt_template = self.get_user_prompt_template(row["user_prompt_template_id"])
-            
             correction_prompt_template = None
             if row["correction_prompt_template_id"]:
-                correction_prompt_template = self.get_user_prompt_template(row["correction_prompt_template_id"])
+                correction_prompt_template = \
+                    self.get_user_prompt_template(row["correction_prompt_template_id"])
 
             return CachedModelRequest(
                 id=row["id"],
