@@ -107,7 +107,21 @@ class KnowledgeGraphBuilder:
         self._insert_in_batches(query, data)
 
     def _insert_entity_to_entity_relations(self) -> None:
-        pass
+        relations = self.data_loader.load_entity_to_entity_relations()
+        data = ({
+            'source_id': r.source_id, 
+            'target_id': r.target_id,
+            'label': r.label,
+            'name': r.name
+        } for r in relations)
+        query = '''
+        UNWIND $batch as item
+        MATCH (a:BASE {id: item.source_id})
+        MATCH (b:BASE {id: item.target_id})
+        CALL apoc.create.relationship(a, item.label, {name: item.name}, b) YIELD rel
+        RETURN count(*)
+        '''
+        self._insert_in_batches(query, data)
 
     def _insert_concept_to_concept_relations(self) -> None:
         pass

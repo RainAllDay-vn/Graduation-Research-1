@@ -1,4 +1,6 @@
 import os
+import csv
+import subprocess
 from typing import Iterator, List, Optional
 
 import pandas as pd
@@ -40,18 +42,65 @@ class UMLSDataLoader(DataLoaderContract):
 
     def load_entity_isa_concept_relations(self) -> Iterator[Relation]:
         cui_set: set[str] = set()
-        for df in self.load_concept_names(chunksize=1_000_000, columns=['CUI']):
-            for row in df.itertuples(index=False):
-                cui = row[0]
-                cui_set.add(cui)
+        for entity in self.load_entities():
+            cui_set.add(entity.id)
 
-        target_cols = ['CUI', 'TUI']
-        for df in self.load_semantic_types(chunksize=1_000_000, columns=target_cols):
+        columns = ['CUI', 'TUI']
+        for df in self.load_semantic_types(chunksize=1_000_000, columns=columns):
             for row in df.itertuples(index=False):
                 cui, tui = row
                 if cui not in cui_set:
                     continue
                 yield Relation(source_id=cui, target_id=tui, label='ISA')
+
+    def load_entity_to_entity_relations(self) -> Iterator[Relation]:
+        temp_dir = os.path.join(self.dataset_path, 'temp')
+        os.makedirs(temp_dir, exist_ok=True)
+        raw_file = os.path.join(temp_dir, 'rels_raw.csv')
+        sorted_file = os.path.join(temp_dir, 'rels_sorted.csv')
+
+        inverse_map = {}
+        mrdoc_df = self.load_mrdoc_definitions()
+        mrdoc_df = mrdoc_df[(mrdoc_df['DOCKEY'] == 'REL') & (mrdoc_df['TYPE'] == 'rel_inverse')]
+        mrdoc_df = mrdoc_df[['VALUE', 'EXPL']]
+        for row in mrdoc_df.itertuples(index=False):
+            inverse_map[row[0]] = row[1]
+
+        print("Phase 1: Streaming relationships to disk...")
+        with open(raw_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f, delimiter='|')
+
+            columns = ['CUI1', 'CUI2', 'STYPE1', 'STYPE2', 'REL', 'RELA']
+            for df in self.load_relationships(chunksize=1_000_000, columns=columns):
+                for row in df.itertuples(index=False):
+                    cui1, cui2, stype1, stype2, rel, rela = row
+                    if stype1 != 'SCUI' or stype2 != 'SCUI' or rela == '':
+                        continue
+
+                    writer.writerow([rel, cui1, cui2, rela])
+                    if rel in inverse_map:
+                        writer.writerow([inverse_map[rel], cui2, cui1, rela])
+
+        print("Phase 2: Sorting relationships...")
+        subprocess.run(['sort', '-t|', '-u', raw_file, '-o', sorted_file], check=True)
+
+        print("Phase 3: Yielding relationships...")
+        with open(sorted_file, 'r', encoding='utf-8') as f:
+            reader = csv.reader(f, delimiter='|')
+            for row in reader:
+                if not row:
+                    continue
+                rel, c1, c2, rela = row
+                yield Relation(
+                    source_id=c1,
+                    target_id=c2,
+                    label=to_screaming_snake_case(rel),
+                    name=rela
+                )
+
+        print("Phase 4: Cleanup...")
+        os.remove(raw_file)
+        os.remove(sorted_file)
 
     def _read_rrf(self,
         file_path: str,
