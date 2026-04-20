@@ -47,7 +47,9 @@ class CachedModelRequest(NamedTuple):
     def from_request_and_response(
         self,
         request: ModelRequest,
-        response: ModelResponse
+        response: ModelResponse,
+        retries: Optional[int] = 0,
+        valiation_result: Optional[str] = None
     ) -> "CachedModelRequest":
         return CachedModelRequest(
             model_name=request.model_name,
@@ -59,6 +61,8 @@ class CachedModelRequest(NamedTuple):
             previous_request_id=request.previous_request_id,
             correction_prompt_template=request.correction_prompt_template,
             response=response.response,
+            retries=retries,
+            valiation_result=valiation_result,
             reasoning=response.reasoning,
             context_length_exceeded=response.context_length_exceeded,
             created_at=datetime.now()

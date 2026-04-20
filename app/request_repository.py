@@ -147,6 +147,33 @@ class RequestRepository:
             conn.commit()
             return cursor.lastrowid
 
+    def _row_to_cached_model_request(self, row: sqlite3.Row) -> CachedModelRequest:
+        system_prompt = self.get_system_prompt(row["system_prompt_id"])
+        user_prompt_template = self.get_user_prompt_template(row["user_prompt_template_id"])
+        correction_prompt_template = None
+        if row["correction_prompt_template_id"]:
+            correction_prompt_template = \
+                self.get_user_prompt_template(row["correction_prompt_template_id"])
+
+        return CachedModelRequest(
+            id=row["id"],
+            model_name=row["model_name"],
+            dataset=row["dataset"],
+            question=row["question"],
+            type=row["type"],
+            system_prompt=system_prompt,
+            user_prompt_template=user_prompt_template,
+            previous_request_id=row["previous_request_id"],
+            correction_prompt_template=correction_prompt_template,
+            valiation_result=row["valiation_result"],
+            include_reasoning=bool(row["include_reasoning"]),
+            response=row["response"],
+            reasoning=row["reasoning"],
+            retries=row["retries"],
+            context_length_exceeded=bool(row["context_length_exceeded"]),
+            created_at=datetime.fromisoformat(row["created_at"])
+        )
+
     def get_request_by_id(self, request_id: int) -> Optional[CachedModelRequest]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -155,31 +182,35 @@ class RequestRepository:
             if not row:
                 return None
 
-            system_prompt = self.get_system_prompt(row["system_prompt_id"])
-            user_prompt_template = self.get_user_prompt_template(row["user_prompt_template_id"])
-            correction_prompt_template = None
-            if row["correction_prompt_template_id"]:
-                correction_prompt_template = \
-                    self.get_user_prompt_template(row["correction_prompt_template_id"])
+            return self._row_to_cached_model_request(row)
 
-            return CachedModelRequest(
-                id=row["id"],
-                model_name=row["model_name"],
-                dataset=row["dataset"],
-                question=row["question"],
-                type=row["type"],
-                system_prompt=system_prompt,
-                user_prompt_template=user_prompt_template,
-                previous_request_id=row["previous_request_id"],
-                correction_prompt_template=correction_prompt_template,
-                valiation_result=row["valiation_result"],
-                include_reasoning=bool(row["include_reasoning"]),
-                response=row["response"],
-                reasoning=row["reasoning"],
-                retries=row["retries"],
-                context_length_exceeded=bool(row["context_length_exceeded"]),
-                created_at=datetime.fromisoformat(row["created_at"])
+    def get_request_by_metadata(self, request: ModelRequest) -> Optional[CachedModelRequest]:
+        with self._get_connection() as conn:
+            model_name=request.model_name
+            dataset=request.dataset
+            question=request.question
+            request_type = request.type
+
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                    SELECT * FROM requests 
+                        WHERE model_name = ? 
+                        AND dataset = ?
+                        AND question = ? 
+                        AND type = ?
+                    ORDER BY created_at
+                """,
+                (model_name, dataset, question, request_type)
             )
 
-    def get_request(self, request: ModelRequest) -> Optional[CachedModelRequest]:
-        pass
+            rows = cursor.fetchall()
+            results = [self._row_to_cached_model_request(row) for row in rows]
+            if not results:
+                return None
+
+            for result in results:
+                if result.valiation_result is None:
+                    return result
+
+            return results[0]
