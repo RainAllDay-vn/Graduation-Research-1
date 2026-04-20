@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 from typing import Optional
-from app.models import CachedModelRequest, SystemPrompt, UserPromptTemplate
+from app.models import ModelRequest,CachedModelRequest, SystemPrompt, UserPromptTemplate
 
 class RequestRepository:
     def __init__(self, db_path: str = "./cache/repository.db"):
@@ -51,6 +51,7 @@ class RequestRepository:
                     include_reasoning INTEGER NOT NULL,
                     response TEXT NOT NULL,
                     reasoning TEXT,
+                    retries INTEGER NOT NULL,
                     context_length_exceeded INTEGER NOT NULL,
                     created_at TIMESTAMP NOT NULL,
                     FOREIGN KEY (system_prompt_id) REFERENCES system_prompts (id),
@@ -120,9 +121,9 @@ class RequestRepository:
                     model_name, dataset, question, type, system_prompt_id, 
                     user_prompt_template_id, previous_request_id, 
                     correction_prompt_template_id, valiation_result, 
-                    include_reasoning, response, reasoning, 
+                    include_reasoning, response, reasoning, retries,
                     context_length_exceeded, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     request.model_name,
@@ -138,6 +139,7 @@ class RequestRepository:
                     1 if request.include_reasoning else 0,
                     request.response,
                     request.reasoning,
+                    request.retries,
                     1 if request.context_length_exceeded else 0,
                     request.created_at.isoformat()
                 )
@@ -145,7 +147,7 @@ class RequestRepository:
             conn.commit()
             return cursor.lastrowid
 
-    def get_request(self, request_id: int) -> Optional[CachedModelRequest]:
+    def get_request_by_id(self, request_id: int) -> Optional[CachedModelRequest]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM requests WHERE id = ?", (request_id,))
@@ -174,6 +176,10 @@ class RequestRepository:
                 include_reasoning=bool(row["include_reasoning"]),
                 response=row["response"],
                 reasoning=row["reasoning"],
+                retries=row["retries"],
                 context_length_exceeded=bool(row["context_length_exceeded"]),
                 created_at=datetime.fromisoformat(row["created_at"])
             )
+
+    def get_request(self, request: ModelRequest) -> Optional[CachedModelRequest]:
+        pass

@@ -32,6 +32,7 @@ class CachedModelRequest(NamedTuple):
     system_prompt: SystemPrompt
     user_prompt_template: UserPromptTemplate
     response: str
+    retries: int
     created_at: datetime
     dataset: Optional[str] = None
     question: Optional[str] = None
