@@ -28,6 +28,10 @@ class LlmClient:
         if request.model_name is None:
             request.model_name = self.model_name
 
+        model_to_call = request.model_name
+        if self.provider and model_to_call and not model_to_call.startswith(f"{self.provider}/"):
+            model_to_call = f"{self.provider}/{model_to_call}"
+
         messages = [
             {"role": "system", "content": request.system_prompt},
             {"role": "user", "content": request.user_prompt}
@@ -48,7 +52,7 @@ class LlmClient:
 
         try:
             response = litellm.completion(
-                model=request.model_name,
+                model=model_to_call,
                 messages=messages,
                 api_key=self.api_key,
                 **kwargs
@@ -61,10 +65,12 @@ class LlmClient:
             context_length_exceeded = finish_reason == "length"
 
             return ModelResponse(
+                model_name=model_to_call,
                 response=content,
                 reasoning=reasoning,
                 context_length_exceeded=context_length_exceeded
             )
 
         except litellm.exceptions.APIError as e:
-            logging.error("LiteLLM api call exception for model %s: %s", request.model_name, e)
+            logging.error("LiteLLM api call exception for model %s: %s", model_to_call, e)
+        return None
