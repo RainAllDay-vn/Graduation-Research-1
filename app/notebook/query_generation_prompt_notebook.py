@@ -108,7 +108,7 @@ def _(loader, pd):
     _df = pd.DataFrame(_dataset, columns=['question', 'answer'])
     _evaluation_df = _df.sample(100, random_state=42)
     questions_and_answers = list(zip(_evaluation_df['question'], _evaluation_df['answer']))
-    return
+    return (questions_and_answers,)
 
 
 @app.cell
@@ -179,8 +179,115 @@ def _(mo, plt, validate_query):
 
         chart = create_pie_chart(valid_count, out_of_context_count, invalid_format_count, f"{template_name} Adherence")
 
-        return metrics, chart
+        return mo.vstack([
+            chart,
+            mo.table([metrics])
+        ])
 
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 1. Improvement Approach 1: Few-Shot Demonstrations
+
+    In this approach, we provide the model with several concrete examples of how to translate medical questions into Cypher queries. This helps the model understand the expected format, the available labels, and the target relationship (`ISA`).
+    """)
+    return
+
+
+@app.cell
+def _(mo):
+    FEW_SHOT_SYSTEM_PROMPT = r"""You are a Cypher query expert for a medical knowledge graph.
+    Your task is to translate natural language questions into Cypher queries.
+
+    The graph contains entities with UMLS semantic labels.
+    Key node labels include: ENTITY, CONCEPT, DISEASE_OR_SYNDROME, SIGN_OR_SYMPTOM, PHARMACOLOGIC_SUBSTANCE, GENE_OR_GENOME, etc.
+    Nodes often have multiple labels. Use the most specific one if known, or ENTITY if unsure.
+    All entities have a 'name' property.
+
+    Available relationship:
+    - [:ISA] : Connects an ENTITY to a CONCEPT.
+
+    Output format:
+    1. A <think> block explaining your step-by-step reasoning.
+    2. The Cypher query wrapped in <cypher> tags.
+    Ensure the query follows the structure: MATCH ... [WHERE ...] RETURN ... [ORDER BY ...] [LIMIT ...]
+
+    ### Examples
+
+    Question: What is Diabetes?
+    <think>
+    The question asks for information about 'Diabetes'. I will find the ENTITY with name 'Diabetes'.
+    </think>
+    <cypher>
+    MATCH (e:ENTITY {name: 'Diabetes'}) RETURN e
+    </cypher>
+
+    Question: What category does Aspirin belong to?
+    <think>
+    The question asks for the category of 'Aspirin'. Categories are represented as CONCEPT nodes connected via the ISA relationship.
+    </think>
+    <cypher>
+    MATCH (e:ENTITY {name: 'Aspirin'})-[:ISA]->(c:CONCEPT) RETURN c.name
+    </cypher>
+
+    Question: Symptoms of Hypertension.
+    <think>
+    The question is about 'Hypertension', which is a DISEASE_OR_SYNDROME. I will search for this entity.
+    </think>
+    <cypher>
+    MATCH (e:DISEASE_OR_SYNDROME {name: 'Hypertension'}) RETURN e
+    </cypher>"""
+
+    FEW_SHOT_USER_PROMPT_TEMPLATE = r"""Convert the following medical question to a Cypher query.
+
+    Question: {question}"""
+
+    mo.md(
+        f"""
+    We consider the following two prompts for this improvement strategy:
+
+    ### 1. System Prompt
+    Establishes a specialized persona that understands UMLS medical labels and the specific graph relationship (`ISA`).
+
+    ```text
+    {FEW_SHOT_SYSTEM_PROMPT}
+    ```
+
+    ### 2. User Prompt Template
+    Simple wrapper for the current question.
+
+    ```text
+    {FEW_SHOT_USER_PROMPT_TEMPLATE}
+    ```
+        """
+    )
+    return FEW_SHOT_SYSTEM_PROMPT, FEW_SHOT_USER_PROMPT_TEMPLATE
+
+
+@app.cell
+def _(
+    FEW_SHOT_SYSTEM_PROMPT,
+    FEW_SHOT_USER_PROMPT_TEMPLATE,
+    QuestionToQueryPipeline,
+    mo,
+    questions_and_answers,
+):
+    mo.md("### Running Few-Shot Pipeline")
+
+    # We use a subset for faster demonstration if needed, but here we use the full 100
+    few_shot_request = QuestionToQueryPipeline.PipelineRunRequest(
+        data=questions_and_answers,
+        system_prompt=FEW_SHOT_SYSTEM_PROMPT,
+        user_prompt_template=FEW_SHOT_USER_PROMPT_TEMPLATE,
+        model_name="gemini-1.5-flash", 
+        dataset="medquad_few_shot",
+        allow_correction=False
+    )
+
+    # pipeline.run(few_shot_request)
     return
 
 
