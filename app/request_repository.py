@@ -1,7 +1,7 @@
 import sqlite3
 from datetime import datetime
 from typing import Optional
-from app.models import ModelRequest,CachedModelRequest, SystemPrompt, UserPromptTemplate
+from app.models import ModelRequest, CachedModelRequest, SystemPrompt, UserPromptTemplate, CorrectionPromptTemplate
 
 class RequestRepository:
     def __init__(self, db_path: str = "./cache/repository.db"):
@@ -9,7 +9,7 @@ class RequestRepository:
         self._init_db()
 
     def _get_connection(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -35,6 +35,15 @@ class RequestRepository:
                 )
             """)
 
+            # Correction Prompt Template Table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS correction_prompt_templates (
+                    id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL
+                )
+            """)
+
             # Cached Model Request Table
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS requests (
@@ -47,16 +56,16 @@ class RequestRepository:
                     user_prompt_template_id TEXT NOT NULL,
                     previous_request_id INTEGER,
                     correction_prompt_template_id TEXT,
-                    valiation_result TEXT,
+                    validation_result TEXT,
                     include_reasoning INTEGER NOT NULL,
                     response TEXT NOT NULL,
                     reasoning TEXT,
-                    retries INTEGER NOT NULL,
+                    retries INTEGER NOT NULL DEFAULT 0,
                     context_length_exceeded INTEGER NOT NULL,
                     created_at TIMESTAMP NOT NULL,
                     FOREIGN KEY (system_prompt_id) REFERENCES system_prompts (id),
                     FOREIGN KEY (user_prompt_template_id) REFERENCES user_prompt_templates (id),
-                    FOREIGN KEY (correction_prompt_template_id) REFERENCES user_prompt_templates (id)
+                    FOREIGN KEY (correction_prompt_template_id) REFERENCES correction_prompt_templates (id)
                 )
             """)
             conn.commit()
@@ -75,6 +84,16 @@ class RequestRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """INSERT OR IGNORE INTO user_prompt_templates 
+                (id, content, created_at) VALUES (?, ?, ?)""",
+                (template.id, template.content, template.created_at.isoformat())
+            )
+            conn.commit()
+
+    def save_correction_prompt_template(self, template: CorrectionPromptTemplate):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """INSERT OR IGNORE INTO correction_prompt_templates 
                 (id, content, created_at) VALUES (?, ?, ?)""",
                 (template.id, template.content, template.created_at.isoformat())
             )
@@ -106,46 +125,69 @@ class RequestRepository:
                 )
             return None
 
+    def get_correction_prompt_template(
+        self,
+        template_id: str
+    ) -> Optional[CorrectionPromptTemplate]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM correction_prompt_templates WHERE id = ?", 
+                (template_id,)
+            )
+            row = cursor.fetchone()
+            if row:
+                return CorrectionPromptTemplate(
+                    id=row["id"],
+                    content=row["content"],
+                    created_at=datetime.fromisoformat(row["created_at"])
+                )
+            return None
+
     def save_request(self, request: CachedModelRequest) -> int:
         # Ensure prompts are saved first
         self.save_system_prompt(request.system_prompt)
         self.save_user_prompt_template(request.user_prompt_template)
         if request.correction_prompt_template:
-            self.save_user_prompt_template(request.correction_prompt_template)
+            self.save_correction_prompt_template(request.correction_prompt_template)
 
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO requests (
-                    model_name, dataset, question, type, system_prompt_id, 
-                    user_prompt_template_id, previous_request_id, 
-                    correction_prompt_template_id, valiation_result, 
-                    include_reasoning, response, reasoning, retries,
-                    context_length_exceeded, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    request.model_name,
-                    request.dataset,
-                    request.question,
-                    request.type,
-                    request.system_prompt.id,
-                    request.user_prompt_template.id,
-                    request.previous_request_id,
-                    request.correction_prompt_template.id
-                        if request.correction_prompt_template else None,
-                    request.valiation_result,
-                    1 if request.include_reasoning else 0,
-                    request.response,
-                    request.reasoning,
-                    request.retries,
-                    1 if request.context_length_exceeded else 0,
-                    request.created_at.isoformat()
+        print("Prompts saved, saving main request body...")
+        conn = self._get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    INSERT INTO requests (
+                        model_name, dataset, question, type, system_prompt_id, 
+                        user_prompt_template_id, previous_request_id, 
+                        correction_prompt_template_id, validation_result, 
+                        include_reasoning, response, reasoning, retries,
+                        context_length_exceeded, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        request.model_name,
+                        request.dataset,
+                        request.question,
+                        request.type,
+                        request.system_prompt.id,
+                        request.user_prompt_template.id,
+                        request.previous_request_id,
+                        request.correction_prompt_template.id
+                            if request.correction_prompt_template else None,
+                        request.validation_result,
+                        1 if request.include_reasoning else 0,
+                        request.response,
+                        request.reasoning,
+                        request.retries,
+                        1 if request.context_length_exceeded else 0,
+                        request.created_at.isoformat()
+                    )
                 )
-            )
-            conn.commit()
-            return cursor.lastrowid
+            print("Request saved successfully")
+        finally:
+            conn.close()
 
     def _row_to_cached_model_request(self, row: sqlite3.Row) -> CachedModelRequest:
         system_prompt = self.get_system_prompt(row["system_prompt_id"])
@@ -153,7 +195,7 @@ class RequestRepository:
         correction_prompt_template = None
         if row["correction_prompt_template_id"]:
             correction_prompt_template = \
-                self.get_user_prompt_template(row["correction_prompt_template_id"])
+                self.get_correction_prompt_template(row["correction_prompt_template_id"])
 
         return CachedModelRequest(
             id=row["id"],
@@ -165,7 +207,7 @@ class RequestRepository:
             user_prompt_template=user_prompt_template,
             previous_request_id=row["previous_request_id"],
             correction_prompt_template=correction_prompt_template,
-            valiation_result=row["valiation_result"],
+            validation_result=row["validation_result"],
             include_reasoning=bool(row["include_reasoning"]),
             response=row["response"],
             reasoning=row["reasoning"],
@@ -210,7 +252,7 @@ class RequestRepository:
                 return None
 
             for result in results:
-                if result.valiation_result is None:
+                if result.validation_result is None:
                     return result
 
             return results[0]

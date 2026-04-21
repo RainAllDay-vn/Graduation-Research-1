@@ -33,13 +33,18 @@ class LlmClient:
             model_to_call = f"{self.provider}/{model_to_call}"
 
         messages = [
-            {"role": "system", "content": request.system_prompt},
-            {"role": "user", "content": request.user_prompt}
+            {"role": "system", "content": request.system_prompt.content},
+            {"role": "user", "content": request.user_prompt_template.content.format(question=request.question)}
         ]
         if request.previous_answer_prompt:
             messages.append({"role": "assistant", "content": request.previous_answer_prompt})
-        if request.correction_prompt:
-            messages.append({"role": "user", "content": request.correction_prompt})
+        if request.correction_prompt_template:
+            messages.append({
+                "role": "user", 
+                "content": request.correction_prompt_template.content.format(
+                    validation_result=request.previous_validation_result
+                )
+            })
 
         kwargs = {}
         if self.api_base:
