@@ -1,8 +1,10 @@
+import threading
 import sqlite3
 from datetime import datetime
 from typing import Optional
 from app.models import (
     ModelRequest,
+    ModelResponse,
     CachedModelRequest,
     SystemPrompt,
     UserPromptTemplate,
@@ -12,6 +14,7 @@ from app.models import (
 class RequestRepository:
     def __init__(self, db_path: str = "./cache/repository.db"):
         self.db_path = db_path
+        self.lock = threading.Lock()
         self._init_db()
 
     def _get_connection(self):
@@ -150,48 +153,66 @@ class RequestRepository:
                 )
             return None
 
-    def save_request(self, request: CachedModelRequest) -> int:
+    def save_request(self, request: CachedModelRequest) -> CachedModelRequest:
         # Ensure prompts are saved first
         self.save_system_prompt(request.system_prompt)
         self.save_user_prompt_template(request.user_prompt_template)
         if request.correction_prompt_template:
             self.save_correction_prompt_template(request.correction_prompt_template)
 
-        conn = self._get_connection()
-        try:
-            with conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO requests (
-                        model_name, dataset, question, type, system_prompt_id, 
-                        user_prompt_template_id, previous_request_id, 
-                        correction_prompt_template_id, validation_result, 
-                        include_reasoning, response, reasoning, retries,
-                        context_length_exceeded, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        request.model_name,
-                        request.dataset,
-                        request.question,
-                        request.type,
-                        request.system_prompt.id,
-                        request.user_prompt_template.id,
-                        request.previous_request_id,
-                        request.correction_prompt_template.id
-                            if request.correction_prompt_template else None,
-                        request.validation_result,
-                        1 if request.include_reasoning else 0,
-                        request.response,
-                        request.reasoning,
-                        request.retries,
-                        1 if request.context_length_exceeded else 0,
-                        request.created_at.isoformat()
+        with self.lock:
+            conn = self._get_connection()
+            try:
+                with conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO requests (
+                            model_name, dataset, question, type, system_prompt_id, 
+                            user_prompt_template_id, previous_request_id, 
+                            correction_prompt_template_id, validation_result, 
+                            include_reasoning, response, reasoning, retries,
+                            context_length_exceeded, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            request.model_name,
+                            request.dataset,
+                            request.question,
+                            request.type,
+                            request.system_prompt.id,
+                            request.user_prompt_template.id,
+                            request.previous_request_id,
+                            request.correction_prompt_template.id
+                                if request.correction_prompt_template else None,
+                            request.validation_result,
+                            1 if request.include_reasoning else 0,
+                            request.response,
+                            request.reasoning,
+                            request.retries,
+                            1 if request.context_length_exceeded else 0,
+                            request.created_at.isoformat()
+                        )
                     )
-                )
-        finally:
-            conn.close()
+                request.id = cursor.lastrowid
+                return request
+            finally:
+                conn.close()
+
+    def save_request_from_model_request_and_response(
+        self,
+        model_request: ModelRequest,
+        response: ModelResponse,
+        current_retries: int,
+        validation_result: Optional[str]
+    ) -> CachedModelRequest:
+        cached_model_request = CachedModelRequest.from_request_and_response(
+            model_request,
+            response,
+            current_retries,
+            validation_result = None if validation_result == "OK" else validation_result
+        )
+        return self.save_request(cached_model_request)
 
     def _row_to_cached_model_request(self, row: sqlite3.Row) -> CachedModelRequest:
         system_prompt = self.get_system_prompt(row["system_prompt_id"])

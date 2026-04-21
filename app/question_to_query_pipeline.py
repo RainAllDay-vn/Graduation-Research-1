@@ -4,20 +4,13 @@ import logging
 import hashlib
 from datetime import datetime
 from typing import List, NamedTuple, Optional, Iterator
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, Future
 import dotenv
 
 from app.knowledge_graph import KnowledgeGraph
 from app.llm_client import LlmClient
 from app.request_repository import RequestRepository
-from app.models import (
-    ModelRequest,
-    ModelResponse,
-    CachedModelRequest,
-    SystemPrompt,
-    UserPromptTemplate,
-    CorrectionPromptTemplate
-)
+from app.models import ModelRequest, ModelResponse, SystemPrompt, UserPromptTemplate, CorrectionPromptTemplate
 from app.validator import validate_query
 
 logger = logging.getLogger(__name__)
@@ -85,12 +78,19 @@ class QuestionToQueryPipeline:
             raise ValueError("LLM client call failed")
 
         logger.info("Starting the generation loop...")
+        def handle_result(future: Future):
+            try:
+                future.result()
+            except Exception as e:
+                logger.error("Thread generated an exception: %s", e, exc_info=True)
+
         with ThreadPoolExecutor(max_workers=5) as executor:
             for model_request in request.to_model_request():
                 if request.allow_correction:
-                    executor.submit(self._retries_loop, request, model_request)
+                    future = executor.submit(self._retries_loop, request, model_request)
                 else:
-                    executor.submit(self._one_shot_generation, request, model_request)
+                    future = executor.submit(self._one_shot_generation, request, model_request)
+                future.add_done_callback(handle_result)
 
     def _increase_progress(self):
         with self.progress_lock:
@@ -125,10 +125,19 @@ class QuestionToQueryPipeline:
     ) -> ModelResponse:
         last_request = None
         if pipeline_request.use_cache:
-            last_request = self._get_cached_request(model_request)
+            last_request = self.request_repository.get_request_by_metadata(model_request)
+            if last_request is not None:
+                logger.info(
+                    "Using cached request for question: %s (Retries: %d)",
+                    model_request.question, last_request.retries
+                )
         current_retries = last_request.retries+1 if last_request else 0
 
         while current_retries < pipeline_request.max_retries:
+            logger.info(
+                "Processing request for question: %s (Retries: %d)",
+                model_request.question, current_retries
+            )
             if last_request is not None:
                 model_request.previous_answer_prompt = last_request.response
                 model_request.previous_request_id = last_request.id
@@ -143,7 +152,7 @@ class QuestionToQueryPipeline:
             response = self.llm_client.call_model(model_request)
             validation_result = validate_query(self.knowledge_graph, response.response)
 
-            last_request = self._cache_request(
+            last_request = self.request_repository.save_request_from_model_request_and_response(
                 model_request,
                 response,
                 current_retries,
@@ -162,13 +171,14 @@ class QuestionToQueryPipeline:
         model_request: ModelRequest
     ) -> ModelResponse:
         if pipeline_request.use_cache:
-            last_request = self._get_cached_request(model_request)
+            last_request = self.request_repository.get_request_by_metadata(model_request)
             if last_request is not None:
+                logger.info("Using cached request for question: %s", model_request.question)
                 return last_request
 
         response = self.llm_client.call_model(model_request)
         validation_result = validate_query(self.knowledge_graph, response.response)
-        self._cache_request(
+        self.request_repository.save_request_from_model_request_and_response(
             model_request,
             response,
             0,
@@ -176,24 +186,3 @@ class QuestionToQueryPipeline:
         )
         self._increase_progress()
         return response
-
-    def _cache_request(
-        self,
-        model_request: ModelRequest,
-        response: ModelResponse,
-        current_retries: int,
-        validation_result: Optional[str]
-    ) -> CachedModelRequest:
-        cached_model_request = CachedModelRequest.from_request_and_response(
-            model_request,
-            response,
-            current_retries,
-            validation_result = None if validation_result == "OK" else validation_result
-        )
-        with self.progress_lock:
-            self.request_repository.save_request(cached_model_request)
-        return cached_model_request
-
-    def _get_cached_request(self, request: ModelRequest) -> Optional[CachedModelRequest]:
-        with self.progress_lock:
-            return self.request_repository.get_request_by_metadata(request)
