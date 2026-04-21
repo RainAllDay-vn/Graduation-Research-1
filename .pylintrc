@@ -4,3 +4,5 @@ disable=
     missing-class-docstring,
     missing-function-docstring,
     broad-exception-caught,
+
+ignore-patterns = [".*notebook\\.py$"]
