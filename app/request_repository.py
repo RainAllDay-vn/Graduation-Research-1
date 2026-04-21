@@ -1,7 +1,13 @@
 import sqlite3
 from datetime import datetime
 from typing import Optional
-from app.models import ModelRequest, CachedModelRequest, SystemPrompt, UserPromptTemplate, CorrectionPromptTemplate
+from app.models import (
+    ModelRequest,
+    CachedModelRequest,
+    SystemPrompt,
+    UserPromptTemplate,
+    CorrectionPromptTemplate
+)
 
 class RequestRepository:
     def __init__(self, db_path: str = "./cache/repository.db"):
@@ -151,7 +157,6 @@ class RequestRepository:
         if request.correction_prompt_template:
             self.save_correction_prompt_template(request.correction_prompt_template)
 
-        print("Prompts saved, saving main request body...")
         conn = self._get_connection()
         try:
             with conn:
@@ -185,7 +190,6 @@ class RequestRepository:
                         request.created_at.isoformat()
                     )
                 )
-            print("Request saved successfully")
         finally:
             conn.close()
 

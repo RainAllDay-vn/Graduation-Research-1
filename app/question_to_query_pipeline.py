@@ -1,16 +1,18 @@
+import os
 import threading
 import logging
 import hashlib
 from datetime import datetime
 from typing import List, NamedTuple, Optional, Iterator
 from concurrent.futures import ThreadPoolExecutor
+import dotenv
 
 from app.knowledge_graph import KnowledgeGraph
 from app.llm_client import LlmClient
 from app.request_repository import RequestRepository
 from app.models import (
-    ModelRequest, 
-    ModelResponse, 
+    ModelRequest,
+    ModelResponse,
     CachedModelRequest,
     SystemPrompt,
     UserPromptTemplate,
@@ -19,6 +21,8 @@ from app.models import (
 from app.validator import validate_query
 
 logger = logging.getLogger(__name__)
+dotenv.load_dotenv()
+
 
 class QuestionToQueryPipeline:
     class PipelineRunRequest(NamedTuple):
@@ -65,6 +69,7 @@ class QuestionToQueryPipeline:
         self.knowledge_graph = knowledge_graph
         self.llm_client = llm_client
         self.request_repository = request_repository
+        self.workers = int(os.getenv("WORKERS")) if os.getenv("WORKERS") else 10
         self.progress_lock = threading.Lock()
         self.progress = 0
 
@@ -130,20 +135,21 @@ class QuestionToQueryPipeline:
                 model_request.previous_request_id = last_request.id
                 model_request.previous_validation_result = last_request.validation_result
                 model_request.correction_prompt_template = CorrectionPromptTemplate(
-                    id=hashlib.sha256(pipeline_request.correction_prompt_template.encode()).hexdigest()[:16],
+                    id=(hashlib
+                        .sha256(pipeline_request.correction_prompt_template.encode())
+                        .hexdigest()[:16]),
                     content=pipeline_request.correction_prompt_template,
                     created_at=datetime.now()
                 )
             response = self.llm_client.call_model(model_request)
             validation_result = validate_query(self.knowledge_graph, response.response)
 
-            last_request = CachedModelRequest.from_request_and_response(
+            last_request = self._cache_request(
                 model_request,
                 response,
                 current_retries,
-                validation_result = None if validation_result == "OK" else validation_result
+                validation_result
             )
-            self.request_repository.save_request(last_request)
             if validation_result == "OK":
                 break
             current_retries +=1
@@ -162,19 +168,33 @@ class QuestionToQueryPipeline:
                 return last_request
 
         response = self.llm_client.call_model(model_request)
-        logger.info("Response: %s", response)
         validation_result = validate_query(self.knowledge_graph, response.response)
-        logger.info("Validation result: %s", validation_result)
-        cached_model_request = CachedModelRequest.from_request_and_response(
+        self._cache_request(
             model_request,
             response,
             0,
-            validation_result = None if validation_result == "OK" else validation_result
+            validation_result
         )
-        logger.info("Caching model request: %s", cached_model_request)
-        self.request_repository.save_request(cached_model_request)
         self._increase_progress()
         return response
 
+    def _cache_request(
+        self,
+        model_request: ModelRequest,
+        response: ModelResponse,
+        current_retries: int,
+        validation_result: Optional[str]
+    ) -> CachedModelRequest:
+        cached_model_request = CachedModelRequest.from_request_and_response(
+            model_request,
+            response,
+            current_retries,
+            validation_result = None if validation_result == "OK" else validation_result
+        )
+        with self.progress_lock:
+            self.request_repository.save_request(cached_model_request)
+        return cached_model_request
+
     def _get_cached_request(self, request: ModelRequest) -> Optional[CachedModelRequest]:
-        return self.request_repository.get_request_by_metadata(request)
+        with self.progress_lock:
+            return self.request_repository.get_request_by_metadata(request)
