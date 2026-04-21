@@ -81,19 +81,19 @@ class QuestionToQueryPipeline:
                 model_request.correction_prompt = (
                     pipeline_request
                     .correction_prompt_template
-                    .format(valiation_result=last_request.valiation_result)
+                    .format(validation_result=last_request.validation_result)
                 )
             response = self.llm_client.call_model(model_request)
-            valiation_result = validate_query(self.knowledge_graph, response.response)
+            validation_result = validate_query(self.knowledge_graph, response.response)
 
             last_request = CachedModelRequest.from_request_and_response(
                 model_request,
                 response,
                 current_retries,
-                valiation_result = None if valiation_result == "OK" else valiation_result
+                validation_result = None if validation_result == "OK" else validation_result
             )
             self.request_repository.save_request(last_request)
-            if valiation_result == "OK":
+            if validation_result == "OK":
                 break
             current_retries +=1
 
