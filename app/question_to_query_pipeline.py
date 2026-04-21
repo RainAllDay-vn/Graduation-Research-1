@@ -23,13 +23,12 @@ from app.validator import validate_query
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
 
-
 class QuestionToQueryPipeline:
     class PipelineRunRequest(NamedTuple):
         data: List[tuple[str, str]]
         system_prompt: str
         user_prompt_template: str
-        model_name: Optional[str] = None
+        model_name: str
         dataset: Optional[str] = None
         type: str = "QUESTION_TO_QUERY"
         include_reasoning: bool = True

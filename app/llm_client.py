@@ -25,9 +25,6 @@ class LlmClient:
         self.provider = provider or os.environ.get("LITELLM_PROVIDER")
 
     def call_model(self, request: ModelRequest) -> ModelResponse:
-        if request.model_name is None:
-            request.model_name = self.model_name
-
         model_to_call = request.model_name
         if self.provider and model_to_call and not model_to_call.startswith(f"{self.provider}/"):
             model_to_call = f"{self.provider}/{model_to_call}"
@@ -70,7 +67,7 @@ class LlmClient:
             context_length_exceeded = finish_reason == "length"
 
             return ModelResponse(
-                model_name=model_to_call,
+                model_name=request.model_name,
                 response=content,
                 reasoning=reasoning,
                 context_length_exceeded=context_length_exceeded

@@ -21,7 +21,7 @@ class CorrectionPromptTemplate(NamedTuple):
 class ModelRequest:
     system_prompt: SystemPrompt
     user_prompt_template: UserPromptTemplate
-    model_name: Optional[str] = None
+    model_name: str
     previous_answer_prompt: Optional[str] = None
     previous_request_id: Optional[int] = None
     correction_prompt_template: Optional[CorrectionPromptTemplate] = None
