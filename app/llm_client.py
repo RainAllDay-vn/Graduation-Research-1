@@ -29,9 +29,27 @@ class LlmClient:
         if self.provider and model_to_call and not model_to_call.startswith(f"{self.provider}/"):
             model_to_call = f"{self.provider}/{model_to_call}"
 
+        # Combine all possible parameters for formatting
+        format_params = {**request.template_parameters}
+        if request.question:
+            format_params["question"] = request.question
+        if request.previous_validation_result:
+            format_params["validation_result"] = request.previous_validation_result
+
         messages = [
-            {"role": "system", "content": request.system_prompt.content},
-            {"role": "user", "content": request.user_prompt_template.content.format(question=request.question)}
+            {
+                "role": "system", 
+                "content": request.system_prompt_template.content.format(
+                    **format_params
+                )
+            },
+            {
+                "role": "user", 
+                "content": request.user_prompt_template.content.format(
+                    **format_params,
+                    question=request.question
+                )
+            }
         ]
         if request.previous_answer_prompt:
             messages.append({"role": "assistant", "content": request.previous_answer_prompt})
@@ -39,6 +57,7 @@ class LlmClient:
             messages.append({
                 "role": "user", 
                 "content": request.correction_prompt_template.content.format(
+                    **format_params,
                     validation_result=request.previous_validation_result
                 )
             })

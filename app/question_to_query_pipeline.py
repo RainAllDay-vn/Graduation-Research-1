@@ -10,7 +10,13 @@ import dotenv
 from app.knowledge_graph import KnowledgeGraph
 from app.llm_client import LlmClient
 from app.request_repository import RequestRepository
-from app.models import ModelRequest, ModelResponse, SystemPrompt, UserPromptTemplate, CorrectionPromptTemplate
+from app.models import (
+    ModelRequest,
+    ModelResponse,
+    SystemPromptTemplate,
+    UserPromptTemplate,
+    CorrectionPromptTemplate
+)
 from app.validator import validate_query
 
 logger = logging.getLogger(__name__)
@@ -19,9 +25,10 @@ dotenv.load_dotenv()
 class QuestionToQueryPipeline:
     class PipelineRunRequest(NamedTuple):
         data: List[tuple[str, str]]
-        system_prompt: str
-        user_prompt_template: str
         model_name: str
+        system_prompt_template: str
+        user_prompt_template: str
+        template_parameters: dict[str, str] = {}
         dataset: Optional[str] = None
         type: str = "QUESTION_TO_QUERY"
         include_reasoning: bool = True
@@ -31,9 +38,9 @@ class QuestionToQueryPipeline:
         use_cache: bool = True
 
         def to_model_request(self) -> Iterator[ModelRequest]:
-            system_prompt_obj = SystemPrompt(
-                id=hashlib.sha256(self.system_prompt.encode()).hexdigest()[:16],
-                content=self.system_prompt,
+            system_prompt_template_obj = SystemPromptTemplate(
+                id=hashlib.sha256(self.system_prompt_template.encode()).hexdigest()[:16],
+                content=self.system_prompt_template,
                 created_at=datetime.now()
             )
             user_prompt_template_obj = UserPromptTemplate(
@@ -46,8 +53,9 @@ class QuestionToQueryPipeline:
                     model_name=self.model_name,
                     dataset=self.dataset,
                     question=question,
-                    system_prompt=system_prompt_obj,
+                    system_prompt_template=system_prompt_template_obj,
                     user_prompt_template=user_prompt_template_obj,
+                    template_parameters=self.template_parameters,
                     type = self.type,
                     include_reasoning=self.include_reasoning
                 )
@@ -101,7 +109,7 @@ class QuestionToQueryPipeline:
         response = self.llm_client.call_model(
             ModelRequest(
                 model_name=request.model_name,
-                system_prompt=SystemPrompt(
+                system_prompt_template=SystemPromptTemplate(
                     id="test_system",
                     content="You are a helpful assistant.",
                     created_at=datetime.now()
@@ -111,6 +119,7 @@ class QuestionToQueryPipeline:
                     content="What is the capital of France?",
                     created_at=datetime.now()
                 ),
+                template_parameters={},
                 question="What is the capital of France?",
                 include_reasoning=request.include_reasoning
             )
