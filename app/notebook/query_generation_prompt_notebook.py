@@ -89,7 +89,7 @@ def _(
         request_repository=repository,
         knowledge_graph=kg
     )
-    return kg, loader, pipeline
+    return kg, loader, pipeline, repository
 
 
 @app.cell
@@ -184,7 +184,7 @@ def _(mo, plt, validate_query):
             mo.table([metrics])
         ])
 
-    return
+    return (evaluate_performance,)
 
 
 @app.cell
@@ -302,23 +302,77 @@ def _(kg, mo):
     ```
         """
     )
-    return node_labels, rel_types
+    return SCHEMA_AWARE_SYSTEM_PROMPT, node_labels, rel_types
+
+
+@app.cell
+def _(mo):
+    COMBINED_SYSTEM_PROMPT_TEMPLATE = r"""You are a Cypher query expert for a medical knowledge graph.
+    Your task is to translate natural language questions into Cypher queries.
+
+    ### Knowledge Graph Schema
+    The graph contains the following node labels:
+    {node_labels}
+
+    The graph contains the following relationship types:
+    {rel_types}
+
+    All nodes have a 'name' property. Use the 'name' property for filtering by entity names.
+
+    ### Instructions
+    - Use only the provided labels and relationship types.
+    - Ensure the Cypher query follows the structure: MATCH ... [WHERE ...] RETURN ...
+    - Output format:
+    1. A <think> block explaining your reasoning.
+    2. The Cypher query wrapped in <cypher> tags.
+
+    ### Examples
+
+    Question: What is Diabetes?
+    <think>
+    The question asks for information about 'Diabetes'. I will find the ENTITY with name 'Diabetes'.
+    </think>
+    <cypher>
+    MATCH (e:ENTITY {{name: 'Diabetes'}}) RETURN e
+    </cypher>
+
+    Question: What category does Aspirin belong to?
+    <think>
+    The question asks for the category of 'Aspirin'. Categories are represented as CONCEPT nodes connected via the ISA relationship.
+    </think>
+    <cypher>
+    MATCH (e:ENTITY {{name: 'Aspirin'}})-[:ISA]->(c:CONCEPT) RETURN c.name
+    </cypher>
+    """
+
+    mo.md(
+        f"""
+    ### 4. Combined Approach: Few-Shot + Schema-Aware
+    This approach combines the dynamic schema information with concrete few-shot examples to provide both context and format guidance.
+
+    ```text
+    {COMBINED_SYSTEM_PROMPT_TEMPLATE}
+    ```
+        """
+    )
+    return (COMBINED_SYSTEM_PROMPT_TEMPLATE,)
 
 
 @app.cell
 def _(
+    COMBINED_SYSTEM_PROMPT_TEMPLATE,
     FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
     FEW_SHOT_USER_PROMPT_TEMPLATE,
     QuestionToQueryPipeline,
+    SCHEMA_AWARE_SYSTEM_PROMPT,
     mo,
     node_labels,
     pipeline,
     questions_and_answers,
     rel_types,
 ):
-    mo.md("### Running Few-Shot Pipeline")
+    mo.md("### Running Improvement Pipelines")
 
-    # We use a subset for faster demonstration if needed, but here we use the full 100
     few_shot_request = QuestionToQueryPipeline.PipelineRunRequest(
         data=questions_and_answers,
         system_prompt_template=FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
@@ -329,7 +383,19 @@ def _(
 
     schema_aware_request = QuestionToQueryPipeline.PipelineRunRequest(
         data=questions_and_answers,
-        system_prompt_template=FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
+        system_prompt_template=SCHEMA_AWARE_SYSTEM_PROMPT,
+        user_prompt_template=FEW_SHOT_USER_PROMPT_TEMPLATE,
+        template_parameters={
+            "node_labels": node_labels,
+            "rel_types": rel_types
+        },
+        dataset="medquad",
+        allow_correction=False
+    )
+
+    combined_request = QuestionToQueryPipeline.PipelineRunRequest(
+        data=questions_and_answers,
+        system_prompt_template=COMBINED_SYSTEM_PROMPT_TEMPLATE,
         user_prompt_template=FEW_SHOT_USER_PROMPT_TEMPLATE,
         template_parameters={
             "node_labels": node_labels,
@@ -341,6 +407,34 @@ def _(
 
     pipeline.run(few_shot_request)
     pipeline.run(schema_aware_request)
+    pipeline.run(combined_request)
+    return combined_request, few_shot_request, schema_aware_request
+
+
+@app.cell
+def _(
+    combined_request,
+    evaluate_performance,
+    few_shot_request,
+    kg,
+    mo,
+    repository,
+    schema_aware_request,
+):
+    mo.md("## 2. Evaluation Results")
+
+    few_shot_results = evaluate_performance(repository, few_shot_request, "Few-Shot", kg)
+    schema_aware_results = evaluate_performance(repository, schema_aware_request, "Schema-Aware", kg)
+    combined_results = evaluate_performance(repository, combined_request, "Combined", kg)
+
+    mo.vstack([
+        mo.md("### Few-Shot Performance"),
+        few_shot_results,
+        mo.md("### Schema-Aware Performance"),
+        schema_aware_results,
+        mo.md("### Combined Performance"),
+        combined_results
+    ])
     return
 
 
