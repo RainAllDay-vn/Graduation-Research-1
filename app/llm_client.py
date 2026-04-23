@@ -46,8 +46,7 @@ class LlmClient:
             {
                 "role": "user", 
                 "content": request.user_prompt_template.content.format(
-                    **format_params,
-                    question=request.question
+                    **{**format_params, "question": request.question}
                 )
             }
         ]
@@ -57,8 +56,7 @@ class LlmClient:
             messages.append({
                 "role": "user", 
                 "content": request.correction_prompt_template.content.format(
-                    **format_params,
-                    validation_result=request.previous_validation_result
+                    **{**format_params, "validation_result": request.previous_validation_result}
                 )
             })
 

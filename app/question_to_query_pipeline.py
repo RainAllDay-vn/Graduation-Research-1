@@ -25,9 +25,9 @@ dotenv.load_dotenv()
 class QuestionToQueryPipeline:
     class PipelineRunRequest(NamedTuple):
         data: List[tuple[str, str]]
-        model_name: str
         system_prompt_template: str
         user_prompt_template: str
+        model_name: str = os.getenv("LITELLM_MODEL")
         template_parameters: dict[str, str] = {}
         dataset: Optional[str] = None
         type: str = "QUESTION_TO_QUERY"
@@ -64,14 +64,17 @@ class QuestionToQueryPipeline:
         self,
         knowledge_graph: KnowledgeGraph,
         llm_client: LlmClient,
-        request_repository: Optional[RequestRepository] = None
+        request_repository: Optional[RequestRepository] = None,
+        workers: int = os.getenv("LITELLM_WORKERS") or 10
     ):
         self.knowledge_graph = knowledge_graph
         self.llm_client = llm_client
         self.request_repository = request_repository
-        self.workers = int(os.getenv("WORKERS")) if os.getenv("WORKERS") else 10
+        self.workers = workers
         self.progress_lock = threading.Lock()
         self.progress = 0
+
+        print(self.workers)
 
     def run(
         self,
@@ -92,7 +95,7 @@ class QuestionToQueryPipeline:
             except Exception as e:
                 logger.error("Thread generated an exception: %s", e, exc_info=True)
 
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        with ThreadPoolExecutor(max_workers=self.workers) as executor:
             for model_request in request.to_model_request():
                 if request.allow_correction:
                     future = executor.submit(self._retries_loop, request, model_request)
