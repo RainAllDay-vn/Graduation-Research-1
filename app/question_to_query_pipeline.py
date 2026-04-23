@@ -86,7 +86,7 @@ class QuestionToQueryPipeline:
 
         logger.info("Testing LLM client call...")
         if not self._test_llm_client(request):
-            raise ValueError("LLM client call failed")
+            raise ValueError("LLM client test call failed, the model may not be available")
 
         logger.info("Starting the generation loop...")
         def handle_result(future: Future):
@@ -109,7 +109,8 @@ class QuestionToQueryPipeline:
             logger.info("Progress: %d requests processed...", self.progress)
 
     def _test_llm_client(self, request: PipelineRunRequest) -> bool:
-        response = self.llm_client.call_model(
+        try:
+            _ = self.llm_client.call_model(
             ModelRequest(
                 model_name=request.model_name,
                 system_prompt_template=SystemPromptTemplate(
@@ -127,8 +128,9 @@ class QuestionToQueryPipeline:
                 include_reasoning=request.include_reasoning
             )
         )
-
-        return response is not None
+            return True
+        except Exception as _:
+            return False
 
     def _retries_loop(
         self,

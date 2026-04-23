@@ -1,8 +1,9 @@
+[MASTER]
+ignore-patterns=.*notebook\.py$
+
 [MESSAGES CONTROL]
 disable=
     missing-module-docstring,
     missing-class-docstring,
     missing-function-docstring,
-    broad-exception-caught,
-
-ignore-patterns = [".*notebook\\.py$"]
+    broad-exception-caught

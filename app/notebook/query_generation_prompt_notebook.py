@@ -89,7 +89,7 @@ def _(
         request_repository=repository,
         knowledge_graph=kg
     )
-    return (loader,)
+    return kg, loader, pipeline
 
 
 @app.cell
@@ -199,7 +199,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    FEW_SHOT_SYSTEM_PROMPT = r"""You are a Cypher query expert for a medical knowledge graph.
+    FEW_SHOT_SYSTEM_PROMPT_TEMPLATE = r"""You are a Cypher query expert for a medical knowledge graph.
     Your task is to translate natural language questions into Cypher queries.
 
     The graph contains entities with UMLS semantic labels.
@@ -222,7 +222,7 @@ def _(mo):
     The question asks for information about 'Diabetes'. I will find the ENTITY with name 'Diabetes'.
     </think>
     <cypher>
-    MATCH (e:ENTITY {name: 'Diabetes'}) RETURN e
+    MATCH (e:ENTITY {{name: 'Diabetes'}}) RETURN e
     </cypher>
 
     Question: What category does Aspirin belong to?
@@ -230,7 +230,7 @@ def _(mo):
     The question asks for the category of 'Aspirin'. Categories are represented as CONCEPT nodes connected via the ISA relationship.
     </think>
     <cypher>
-    MATCH (e:ENTITY {name: 'Aspirin'})-[:ISA]->(c:CONCEPT) RETURN c.name
+    MATCH (e:ENTITY {{name: 'Aspirin'}})-[:ISA]->(c:CONCEPT) RETURN c.name
     </cypher>
 
     Question: Symptoms of Hypertension.
@@ -238,7 +238,7 @@ def _(mo):
     The question is about 'Hypertension', which is a DISEASE_OR_SYNDROME. I will search for this entity.
     </think>
     <cypher>
-    MATCH (e:DISEASE_OR_SYNDROME {name: 'Hypertension'}) RETURN e
+    MATCH (e:DISEASE_OR_SYNDROME {{name: 'Hypertension'}}) RETURN e
     </cypher>"""
 
     FEW_SHOT_USER_PROMPT_TEMPLATE = r"""Convert the following medical question to a Cypher query.
@@ -253,7 +253,7 @@ def _(mo):
     Establishes a specialized persona that understands UMLS medical labels and the specific graph relationship (`ISA`).
 
     ```text
-    {FEW_SHOT_SYSTEM_PROMPT}
+    {FEW_SHOT_SYSTEM_PROMPT_TEMPLATE}
     ```
 
     ### 2. User Prompt Template
@@ -264,30 +264,83 @@ def _(mo):
     ```
         """
     )
-    return FEW_SHOT_SYSTEM_PROMPT, FEW_SHOT_USER_PROMPT_TEMPLATE
+    return FEW_SHOT_SYSTEM_PROMPT_TEMPLATE, FEW_SHOT_USER_PROMPT_TEMPLATE
+
+
+@app.cell
+def _(kg, mo):
+    node_labels = kg.get_node_labels()
+    rel_types = kg.get_relation_labels()
+
+    SCHEMA_AWARE_SYSTEM_PROMPT = """You are a Cypher query expert for a medical knowledge graph.
+    Your task is to translate natural language questions into Cypher queries.
+
+    ### Knowledge Graph Schema
+    The graph contains the following node labels:
+    {node_labels}
+
+    The graph contains the following relationship types:
+    {rel_types}
+
+    All nodes have a 'name' property. Use the 'name' property for filtering by entity names.
+
+    ### Instructions
+    - Use only the provided labels and relationship types.
+    - Ensure the Cypher query follows the structure: MATCH ... [WHERE ...] RETURN ...
+    - Output format:
+    1. A <think> block explaining your reasoning.
+    2. The Cypher query wrapped in <cypher> tags.
+    """
+
+    mo.md(
+        f"""
+    ### 3. Schema-Aware System Prompt
+    This prompt dynamically incorporates the available labels and relationships directly from the knowledge graph schema to improve ontology awareness.
+
+    ```text
+    {SCHEMA_AWARE_SYSTEM_PROMPT}
+    ```
+        """
+    )
+    return node_labels, rel_types
 
 
 @app.cell
 def _(
-    FEW_SHOT_SYSTEM_PROMPT,
+    FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
     FEW_SHOT_USER_PROMPT_TEMPLATE,
     QuestionToQueryPipeline,
     mo,
+    node_labels,
+    pipeline,
     questions_and_answers,
+    rel_types,
 ):
     mo.md("### Running Few-Shot Pipeline")
 
     # We use a subset for faster demonstration if needed, but here we use the full 100
     few_shot_request = QuestionToQueryPipeline.PipelineRunRequest(
         data=questions_and_answers,
-        system_prompt=FEW_SHOT_SYSTEM_PROMPT,
+        system_prompt_template=FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
         user_prompt_template=FEW_SHOT_USER_PROMPT_TEMPLATE,
-        model_name="gemini-1.5-flash", 
-        dataset="medquad_few_shot",
+        dataset="medquad",
         allow_correction=False
     )
 
-    # pipeline.run(few_shot_request)
+    schema_aware_request = QuestionToQueryPipeline.PipelineRunRequest(
+        data=questions_and_answers,
+        system_prompt_template=FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
+        user_prompt_template=FEW_SHOT_USER_PROMPT_TEMPLATE,
+        template_parameters={
+            "node_labels": node_labels,
+            "rel_types": rel_types
+        },
+        dataset="medquad",
+        allow_correction=False
+    )
+
+    pipeline.run(few_shot_request)
+    pipeline.run(schema_aware_request)
     return
 
 
