@@ -60,12 +60,15 @@ class QuestionToQueryPipeline:
                     include_reasoning=self.include_reasoning
                 )
 
+    class PipelineRunResponse(NamedTuple):
+        futures: List[Future[ModelResponse]]
+
     def __init__(
         self,
         knowledge_graph: KnowledgeGraph,
         llm_client: LlmClient,
         request_repository: Optional[RequestRepository] = None,
-        workers: int = os.getenv("LITELLM_WORKERS") or 10
+        workers: int = int(os.getenv("LITELLM_WORKERS")) if os.getenv("LITELLM_WORKERS") else 10
     ):
         self.knowledge_graph = knowledge_graph
         self.llm_client = llm_client
@@ -73,13 +76,14 @@ class QuestionToQueryPipeline:
         self.workers = workers
         self.progress_lock = threading.Lock()
         self.progress = 0
+        self.executor = ThreadPoolExecutor(max_workers=self.workers)
 
         print(self.workers)
 
     def run(
         self,
         request: PipelineRunRequest
-    ):
+    ) -> PipelineRunResponse:
         logger.info("Starting question to query pipeline with %d questions...", len(request.data))
         if request.use_cache and self.request_repository is None:
             raise ValueError("Request repository is not initialized")
@@ -95,13 +99,16 @@ class QuestionToQueryPipeline:
             except Exception as e:
                 logger.error("Thread generated an exception: %s", e, exc_info=True)
 
-        with ThreadPoolExecutor(max_workers=self.workers) as executor:
-            for model_request in request.to_model_request():
-                if request.allow_correction:
-                    future = executor.submit(self._retries_loop, request, model_request)
-                else:
-                    future = executor.submit(self._one_shot_generation, request, model_request)
-                future.add_done_callback(handle_result)
+        futures = []
+        for model_request in request.to_model_request():
+            if request.allow_correction:
+                future = self.executor.submit(self._retries_loop, request, model_request)
+            else:
+                future = self.executor.submit(self._one_shot_generation, request, model_request)
+            future.add_done_callback(handle_result)
+            futures.append(future)
+
+        return self.PipelineRunResponse(futures=futures)
 
     def _increase_progress(self):
         with self.progress_lock:

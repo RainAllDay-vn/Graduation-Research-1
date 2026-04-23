@@ -365,14 +365,11 @@ def _(
     FEW_SHOT_USER_PROMPT_TEMPLATE,
     QuestionToQueryPipeline,
     SCHEMA_AWARE_SYSTEM_PROMPT,
-    mo,
     node_labels,
     pipeline,
     questions_and_answers,
     rel_types,
 ):
-    mo.md("### Running Improvement Pipelines")
-
     few_shot_request = QuestionToQueryPipeline.PipelineRunRequest(
         data=questions_and_answers,
         system_prompt_template=FEW_SHOT_SYSTEM_PROMPT_TEMPLATE,
@@ -405,9 +402,12 @@ def _(
         allow_correction=False
     )
 
-    pipeline.run(few_shot_request)
-    pipeline.run(schema_aware_request)
-    pipeline.run(combined_request)
+    res1 = pipeline.run(few_shot_request)
+    res2 = pipeline.run(schema_aware_request)
+    res3 = pipeline.run(combined_request)
+
+    from concurrent.futures import wait
+    wait(res1.futures + res2.futures + res3.futures)
     return combined_request, few_shot_request, schema_aware_request
 
 
