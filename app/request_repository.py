@@ -1,3 +1,4 @@
+import json
 import threading
 import sqlite3
 from datetime import datetime
@@ -6,7 +7,7 @@ from app.models import (
     ModelRequest,
     ModelResponse,
     CachedModelRequest,
-    SystemPrompt,
+    SystemPromptTemplate,
     UserPromptTemplate,
     CorrectionPromptTemplate
 )
@@ -63,6 +64,7 @@ class RequestRepository:
                     type TEXT,
                     system_prompt_id TEXT NOT NULL,
                     user_prompt_template_id TEXT NOT NULL,
+                    template_parameters TEXT,
                     previous_request_id INTEGER,
                     correction_prompt_template_id TEXT,
                     validation_result TEXT,
@@ -77,9 +79,15 @@ class RequestRepository:
                     FOREIGN KEY (correction_prompt_template_id) REFERENCES correction_prompt_templates (id)
                 )
             """)
+
+            # Add template_parameters column if it doesn't exist
+            cursor.execute("PRAGMA table_info(requests)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'template_parameters' not in columns:
+                cursor.execute("ALTER TABLE requests ADD COLUMN template_parameters TEXT")
             conn.commit()
 
-    def save_system_prompt(self, prompt: SystemPrompt):
+    def save_system_prompt(self, prompt: SystemPromptTemplate):
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -108,13 +116,13 @@ class RequestRepository:
             )
             conn.commit()
 
-    def get_system_prompt(self, prompt_id: str) -> Optional[SystemPrompt]:
+    def get_system_prompt(self, prompt_id: str) -> Optional[SystemPromptTemplate]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM system_prompts WHERE id = ?", (prompt_id,))
             row = cursor.fetchone()
             if row:
-                return SystemPrompt(
+                return SystemPromptTemplate(
                     id=row["id"],
                     content=row["content"],
                     created_at=datetime.fromisoformat(row["created_at"])
@@ -155,7 +163,7 @@ class RequestRepository:
 
     def save_request(self, request: CachedModelRequest) -> CachedModelRequest:
         # Ensure prompts are saved first
-        self.save_system_prompt(request.system_prompt)
+        self.save_system_prompt(request.system_prompt_template)
         self.save_user_prompt_template(request.user_prompt_template)
         if request.correction_prompt_template:
             self.save_correction_prompt_template(request.correction_prompt_template)
@@ -169,19 +177,20 @@ class RequestRepository:
                         """
                         INSERT INTO requests (
                             model_name, dataset, question, type, system_prompt_id, 
-                            user_prompt_template_id, previous_request_id, 
+                            user_prompt_template_id, template_parameters, previous_request_id, 
                             correction_prompt_template_id, validation_result, 
                             include_reasoning, response, reasoning, retries,
                             context_length_exceeded, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             request.model_name,
                             request.dataset,
                             request.question,
                             request.type,
-                            request.system_prompt.id,
+                            request.system_prompt_template.id,
                             request.user_prompt_template.id,
+                            json.dumps(request.template_parameters),
                             request.previous_request_id,
                             request.correction_prompt_template.id
                                 if request.correction_prompt_template else None,
@@ -215,12 +224,16 @@ class RequestRepository:
         return self.save_request(cached_model_request)
 
     def _row_to_cached_model_request(self, row: sqlite3.Row) -> CachedModelRequest:
-        system_prompt = self.get_system_prompt(row["system_prompt_id"])
+        system_prompt_template = self.get_system_prompt(row["system_prompt_id"])
         user_prompt_template = self.get_user_prompt_template(row["user_prompt_template_id"])
         correction_prompt_template = None
         if row["correction_prompt_template_id"]:
             correction_prompt_template = \
                 self.get_correction_prompt_template(row["correction_prompt_template_id"])
+
+        template_parameters = {}
+        if row["template_parameters"]:
+            template_parameters = json.loads(row["template_parameters"])
 
         return CachedModelRequest(
             id=row["id"],
@@ -228,8 +241,9 @@ class RequestRepository:
             dataset=row["dataset"],
             question=row["question"],
             type=row["type"],
-            system_prompt=system_prompt,
+            system_prompt_template=system_prompt_template,
             user_prompt_template=user_prompt_template,
+            template_parameters=template_parameters,
             previous_request_id=row["previous_request_id"],
             correction_prompt_template=correction_prompt_template,
             validation_result=row["validation_result"],

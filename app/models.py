@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Optional, NamedTuple
 from dataclasses import dataclass
 
-class SystemPrompt(NamedTuple):
+class SystemPromptTemplate(NamedTuple):
     id: str
     content: str
     created_at: datetime
@@ -19,9 +19,10 @@ class CorrectionPromptTemplate(NamedTuple):
 
 @dataclass
 class ModelRequest:
-    system_prompt: SystemPrompt
-    user_prompt_template: UserPromptTemplate
     model_name: str
+    system_prompt_template: SystemPromptTemplate
+    user_prompt_template: UserPromptTemplate
+    template_parameters: dict[str, str]
     previous_answer_prompt: Optional[str] = None
     previous_request_id: Optional[int] = None
     correction_prompt_template: Optional[CorrectionPromptTemplate] = None
@@ -41,8 +42,9 @@ class ModelResponse:
 @dataclass
 class CachedModelRequest:
     model_name: str
-    system_prompt: SystemPrompt
+    system_prompt_template: SystemPromptTemplate
     user_prompt_template: UserPromptTemplate
+    template_parameters: dict[str, str]
     response: str
     retries: int
     created_at: datetime
@@ -70,8 +72,9 @@ class CachedModelRequest:
             dataset=request.dataset,
             question=request.question,
             type=request.type,
-            system_prompt=request.system_prompt,
+            system_prompt_template=request.system_prompt_template,
             user_prompt_template=request.user_prompt_template,
+            template_parameters=request.template_parameters,
             previous_request_id=request.previous_request_id,
             correction_prompt_template=request.correction_prompt_template,
             response=response.response,
